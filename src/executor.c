@@ -1,4 +1,6 @@
 #include <limits.h>
+#include <math.h>
+#include <ctype.h>
 
 #include "db.h"
 #include "logger.h"
@@ -27,6 +29,7 @@ static void print_row_data(const Row* row, const TableDef* schema);
 static void print_project_header(const IRNode* current, const TableDef* schema);
 static void print_project_separator(const IRNode* current, const TableDef* schema);
 static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema);
+static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
 
 static Table* find_table(const char* name) {
     for (int i = 0; i < table_count; i++) {
@@ -313,8 +316,6 @@ static void exec_scan_table(const IRNode* current) {
         Row* row = &table->rows[row_idx];
         print_row_data(row, &table->schema);
     }
-
-    printf("%d rows\n", table->row_count);
 }
 
 static void exec_drop_table(const IRNode* current) {
@@ -356,16 +357,12 @@ static void exec_filter(const IRNode* current) {
     print_table_header(&table->schema);
     print_table_separator(table->schema.column_count);
 
-    int matching_rows = 0;
     for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
         Row* row = &table->rows[row_idx];
         if (eval_expression(current->filter.filter_expr, row, &table->schema)) {
             print_row_data(row, &table->schema);
-            matching_rows++;
         }
     }
-
-    printf("%d rows (filtered)\n", matching_rows);
 }
 
 static void exec_update_row(const IRNode* current) {
@@ -471,7 +468,6 @@ static void exec_project(const IRNode* current) {
         rows_processed++;
     }
 
-    printf("%d rows\n", rows_processed);
 }
 
 static bool is_null(Value val) { return strcmp(val.value, "NULL") == 0; }
@@ -691,6 +687,8 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
                 error_val.type = TYPE_STRING;
                 return error_val;
             }
+        case EXPR_SCALAR_FUNC:
+            return eval_scalar_function(expr, row, schema);
         default: {
             Value error_val;
             strcpy(error_val.value, "ERROR");
@@ -698,6 +696,261 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
             return error_val;
         }
     }
+}
+
+static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema) {
+    Value result;
+    result.type = TYPE_STRING;
+    strcpy(result.value, "ERROR");
+
+    if (strcmp(expr->scalar.func_name, "ABS") == 0) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        if (arg.type == TYPE_INT || arg.type == TYPE_FLOAT) {
+            double val = atof(arg.value);
+            double abs_val = val < 0 ? -val : val;
+            if (arg.type == TYPE_INT) {
+                snprintf(result.value, MAX_STRING_LEN, "%.0f", abs_val);
+                result.type = TYPE_INT;
+            } else {
+                snprintf(result.value, MAX_STRING_LEN, "%.6f", abs_val);
+                result.type = TYPE_FLOAT;
+            }
+        }
+    } else if (strcmp(expr->scalar.func_name, "UPPER") == 0) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        for (int i = 0; arg.value[i] && i < MAX_STRING_LEN - 1; i++) {
+            result.value[i] = toupper(arg.value[i]);
+        }
+        result.type = TYPE_STRING;
+    } else if (strcmp(expr->scalar.func_name, "LOWER") == 0) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        for (int i = 0; arg.value[i] && i < MAX_STRING_LEN - 1; i++) {
+            result.value[i] = tolower(arg.value[i]);
+        }
+        result.type = TYPE_STRING;
+    } else if (strcmp(expr->scalar.func_name, "LENGTH") == 0) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        int len = strlen(arg.value);
+        snprintf(result.value, MAX_STRING_LEN, "%d", len);
+        result.type = TYPE_INT;
+    } else if (strcmp(expr->scalar.func_name, "MID") == 0 || strcmp(expr->scalar.func_name, "SUBSTRING") == 0) {
+        if (expr->scalar.arg_count < 2 || expr->scalar.arg_count > 3) return result;
+        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value start_arg = eval_select_expression(expr->scalar.args[1], row, schema);
+        
+        if (strcmp(str_arg.value, "NULL") == 0 || strcmp(start_arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        int start = atoi(start_arg.value) - 1;
+        if (start < 0) start = 0;
+        
+        int len = strlen(str_arg.value);
+        if (start >= len) {
+            strcpy(result.value, "");
+            return result;
+        }
+        
+        int max_len = len - start;
+        if (expr->scalar.arg_count == 3) {
+            Value length_arg = eval_select_expression(expr->scalar.args[2], row, schema);
+            if (strcmp(length_arg.value, "NULL") == 0) {
+                strcpy(result.value, "NULL");
+                return result;
+            }
+            int requested_len = atoi(length_arg.value);
+            if (requested_len < max_len) max_len = requested_len;
+        }
+        
+        strncpy(result.value, str_arg.value + start, max_len);
+        result.value[max_len] = '\0';
+        result.type = TYPE_STRING;
+    } else if (strcmp(expr->scalar.func_name, "LEFT") == 0) {
+        if (expr->scalar.arg_count != 2) return result;
+        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value len_arg = eval_select_expression(expr->scalar.args[1], row, schema);
+        
+        if (strcmp(str_arg.value, "NULL") == 0 || strcmp(len_arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        int len = atoi(len_arg.value);
+        int str_len = strlen(str_arg.value);
+        if (len > str_len) len = str_len;
+        if (len < 0) len = 0;
+        
+        strncpy(result.value, str_arg.value, len);
+        result.value[len] = '\0';
+        result.type = TYPE_STRING;
+    } else if (strcmp(expr->scalar.func_name, "RIGHT") == 0) {
+        if (expr->scalar.arg_count != 2) return result;
+        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value len_arg = eval_select_expression(expr->scalar.args[1], row, schema);
+        
+        if (strcmp(str_arg.value, "NULL") == 0 || strcmp(len_arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        int len = atoi(len_arg.value);
+        int str_len = strlen(str_arg.value);
+        if (len > str_len) len = str_len;
+        if (len < 0) len = 0;
+        
+        int start = str_len - len;
+        strcpy(result.value, str_arg.value + start);
+        result.type = TYPE_STRING;
+    } else if (strcmp(expr->scalar.func_name, "ROUND") == 0) {
+        if (expr->scalar.arg_count < 1 || expr->scalar.arg_count > 2) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double val = atof(arg.value);
+        int decimals = 0;
+        if (expr->scalar.arg_count == 2) {
+            Value dec_arg = eval_select_expression(expr->scalar.args[1], row, schema);
+            if (strcmp(dec_arg.value, "NULL") == 0) {
+                strcpy(result.value, "NULL");
+                return result;
+            }
+            decimals = atoi(dec_arg.value);
+        }
+        
+        if (decimals == 0) {
+            double rounded = round(val);
+            snprintf(result.value, MAX_STRING_LEN, "%.0f", rounded);
+            result.type = TYPE_INT;
+        } else {
+            double factor = pow(10, decimals);
+            double rounded = round(val * factor) / factor;
+            snprintf(result.value, MAX_STRING_LEN, "%.*f", decimals, rounded);
+            result.type = TYPE_FLOAT;
+        }
+    } else if (strcmp(expr->scalar.func_name, "FLOOR") == 0) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double val = atof(arg.value);
+        double floored = floor(val);
+        snprintf(result.value, MAX_STRING_LEN, "%.0f", floored);
+        result.type = TYPE_INT;
+    } else if (strcmp(expr->scalar.func_name, "CEIL") == 0) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double val = atof(arg.value);
+        double ceiled = ceil(val);
+        snprintf(result.value, MAX_STRING_LEN, "%.0f", ceiled);
+        result.type = TYPE_INT;
+    } else if (strcmp(expr->scalar.func_name, "SQRT") == 0) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (strcmp(arg.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double val = atof(arg.value);
+        if (val < 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double sqrt_val = sqrt(val);
+        snprintf(result.value, MAX_STRING_LEN, "%.6f", sqrt_val);
+        result.type = TYPE_FLOAT;
+    } else if (strcmp(expr->scalar.func_name, "MOD") == 0) {
+        if (expr->scalar.arg_count != 2) return result;
+        Value arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
+        
+        if (strcmp(arg1.value, "NULL") == 0 || strcmp(arg2.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double val1 = atof(arg1.value);
+        double val2 = atof(arg2.value);
+        if (val2 == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double mod_val = fmod(val1, val2);
+        snprintf(result.value, MAX_STRING_LEN, "%.6f", mod_val);
+        result.type = TYPE_FLOAT;
+    } else if (strcmp(expr->scalar.func_name, "POWER") == 0) {
+        if (expr->scalar.arg_count != 2) return result;
+        Value arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
+        
+        if (strcmp(arg1.value, "NULL") == 0 || strcmp(arg2.value, "NULL") == 0) {
+            strcpy(result.value, "NULL");
+            return result;
+        }
+        
+        double val1 = atof(arg1.value);
+        double val2 = atof(arg2.value);
+        
+        double power_val = pow(val1, val2);
+        snprintf(result.value, MAX_STRING_LEN, "%.6f", power_val);
+        result.type = TYPE_FLOAT;
+    } else if (strcmp(expr->scalar.func_name, "CONCAT") == 0) {
+        if (expr->scalar.arg_count < 2) return result;
+        
+        strcpy(result.value, "");
+        for (int i = 0; i < expr->scalar.arg_count; i++) {
+            Value arg = eval_select_expression(expr->scalar.args[i], row, schema);
+            if (strcmp(arg.value, "NULL") == 0) {
+                strcpy(result.value, "NULL");
+                return result;
+            }
+            
+            if (strlen(result.value) + strlen(arg.value) < MAX_STRING_LEN) {
+                strcat(result.value, arg.value);
+            }
+        }
+        result.type = TYPE_STRING;
+    }
+
+    return result;
 }
 
 static void exec_delete_row(const IRNode* current) {

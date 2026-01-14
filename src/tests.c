@@ -19,6 +19,7 @@ static Table* find_table(const char* name) {
 
 static void exec(const char* sql);
 static void test_select_data(void);
+static void test_scalar_functions(void);
 void reset_database(void) { table_count = 0; }
 
 static void exec(const char* sql) {
@@ -425,6 +426,51 @@ void test_aggregate_functions(void) {
     log_msg(LOG_INFO, "Aggregate function tests passed");
 }
 
+static void test_scalar_functions(void) {
+    log_msg(LOG_INFO, "Testing scalar functions...");
+
+    reset_database();
+
+    exec("CREATE TABLE test_func (id INT, name STRING, value FLOAT, desc STRING);");
+    exec("INSERT INTO test_func (1, 'Hello', -15.5, 'World');");
+    exec("INSERT INTO test_func (2, 'TEST', 42.7, 'Database');");
+    exec("INSERT INTO test_func (3, 'Mixed', 0.0, 'CASE');");
+
+    printf("Testing ABS function:\n");
+    exec("SELECT ABS(value) FROM test_func;");
+
+    printf("Testing UPPER/LOWER functions:\n");
+    exec("SELECT UPPER(name), LOWER(name) FROM test_func;");
+
+    printf("Testing LENGTH function:\n");
+    exec("SELECT LENGTH(name), LENGTH(desc) FROM test_func;");
+
+    printf("Testing LEFT/RIGHT functions:\n");
+    exec("SELECT LEFT(name, 2), RIGHT(desc, 3) FROM test_func;");
+
+    printf("Testing MID/SUBSTRING functions:\n");
+    exec("SELECT MID(desc, 2, 3), SUBSTRING(name, 2, 2) FROM test_func;");
+
+    printf("Testing ROUND/FLOOR/CEIL functions:\n");
+    exec("SELECT ROUND(value), FLOOR(value), CEIL(value) FROM test_func;");
+
+    printf("Testing SQRT function:\n");
+    exec("SELECT SQRT(16), SQRT(value + 20) FROM test_func WHERE id = 2;");
+
+    printf("Testing MOD function:\n");
+    exec("SELECT MOD(10, 3), MOD(value, 5) FROM test_func WHERE id = 2;");
+
+    printf("Testing CONCAT function:\n");
+    exec("SELECT CONCAT(name, desc), CONCAT('ID:', id) FROM test_func;");
+
+    printf("Testing POWER function:\n");
+    exec("SELECT POWER(2, 3), POWER(value, 2) FROM test_func WHERE id = 2;");
+
+    printf("Testing NULL handling:\n");
+    exec("INSERT INTO test_func VALUES (4, NULL, NULL, NULL);");
+    exec("SELECT ABS(value), UPPER(name), LENGTH(desc) FROM test_func WHERE id = 4;");
+}
+
 void test_complex_queries(void) {
     log_msg(LOG_INFO, "Testing complex queries...");
 
@@ -463,14 +509,7 @@ void test_error_conditions(void) {
     log_msg(LOG_INFO, "Error condition tests passed");
 }
 
-int main(int argc, char* argv[]) {
-    if (argc && strcmp(argv[0], "--help") == 0) {
-        printf("Usage: %s [--integration|--all]\n", argv[0]);
-        printf("  (no args): Run unit tests only\n");
-        printf("  --integration: Run integration tests only\n");
-        printf("  --all: Run both unit and integration tests\n");
-        return 1;
-    }
+int main(void) {
     set_log_level(LOG_DEBUG);
     log_msg(LOG_INFO, "Running DB test suite...");
 
@@ -488,6 +527,7 @@ int main(int argc, char* argv[]) {
     test_maximum_limits();
     test_data_types();
     test_aggregate_functions();
+    test_scalar_functions();
     test_complex_queries();
     test_error_conditions();
 

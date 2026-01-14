@@ -15,7 +15,7 @@ TEST_TARGET = $(BINDIR)/test_db
 all: $(TARGET)
 
 $(TARGET): $(filter-out $(BUILDDIR)/tests.o,$(OBJECTS)) | $(BINDIR)
-	$(CC) $(filter-out $(BUILDDIR)/tests.o,$(OBJECTS)) -o $@
+	$(CC) $(filter-out $(BUILDDIR)/tests.o,$(OBJECTS)) -o $@ -lm
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
@@ -33,7 +33,7 @@ $(BINDIR):
 	mkdir -p $(BINDIR)
 
 $(TEST_TARGET): $(filter-out $(BUILDDIR)/main.o $(BUILDDIR)/tests.o,$(OBJECTS)) $(BUILDDIR)/tests.o | $(BINDIR)
-	$(CC) $(filter-out $(BUILDDIR)/main.o $(BUILDDIR)/tests.o,$(OBJECTS)) $(BUILDDIR)/tests.o -o $@
+	$(CC) $(filter-out $(BUILDDIR)/main.o $(BUILDDIR)/tests.o,$(OBJECTS)) $(BUILDDIR)/tests.o -o $@ -lm
 
 debug: CFLAGS += -DDEBUG -g3
 debug: $(TARGET)

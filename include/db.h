@@ -37,6 +37,7 @@ typedef enum {
   TOKEN_NOT,
   TOKEN_LIKE,
   TOKEN_AGGREGATE_FUNC, 
+  TOKEN_SCALAR_FUNC,
   TOKEN_DISTINCT       
 } TokenType;
 
@@ -83,7 +84,8 @@ typedef enum {
   EXPR_VALUE,
   EXPR_BINARY_OP,
   EXPR_UNARY_OP,
-  EXPR_AGGREGATE_FUNC 
+  EXPR_AGGREGATE_FUNC,
+  EXPR_SCALAR_FUNC
 } ExprType;
 
 typedef enum {
@@ -118,7 +120,12 @@ typedef struct Expr {
       struct Expr *operand; 
       bool distinct;       
       bool count_all;     
-    } aggregate;         
+    } aggregate;
+    struct {
+      char func_name[16];
+      struct Expr *args[3];
+      int arg_count;
+    } scalar;         
   };
 } Expr;
 

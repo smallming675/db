@@ -1,22 +1,30 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 #include <ctype.h>
 
 #include "db.h"
 #include "logger.h"
 
 static bool is_keyword(const char* str) {
-    return strcmp(str, "CREATE") == 0 || strcmp(str, "TABLE") == 0 || strcmp(str, "INSERT") == 0 ||
-           strcmp(str, "INTO") == 0 || strcmp(str, "VALUES") == 0 || strcmp(str, "SELECT") == 0 ||
-           strcmp(str, "FROM") == 0 || strcmp(str, "DROP") == 0 || strcmp(str, "INT") == 0 ||
-           strcmp(str, "STRING") == 0 || strcmp(str, "FLOAT") == 0 || strcmp(str, "NULL") == 0 ||
-           strcmp(str, "WHERE") == 0 || strcmp(str, "AND") == 0 || strcmp(str, "OR") == 0 ||
-           strcmp(str, "NOT") == 0 || strcmp(str, "UPDATE") == 0 || strcmp(str, "SET") == 0 ||
-           strcmp(str, "DELETE") == 0 || strcmp(str, "SUM") == 0 || strcmp(str, "COUNT") == 0 ||
-           strcmp(str, "AVG") == 0 || strcmp(str, "MIN") == 0 || strcmp(str, "MAX") == 0 ||
-           strcmp(str, "DISTINCT") == 0;
+    static const char* keywords[] = {
+        "CREATE", "TABLE", "INSERT", "INTO", "VALUES", "SELECT", "FROM", "DROP", 
+        "INT", "STRING", "FLOAT", "NULL", "WHERE", "AND", "OR", "NOT", 
+        "UPDATE", "SET", "DELETE", "SUM", "COUNT", "AVG", "MIN", "MAX", "DISTINCT"
+    };
+    static const int keyword_count = sizeof(keywords) / sizeof(keywords[0]);
+    
+    for (int i = 0; i < keyword_count; i++) {
+        if (strcasecmp(str, keywords[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool is_operator_char(char c) {
-    return c == '=' || c == '<' || c == '>' || c == '!' || c == '+' || c == '-' || c == '*' ||
+    return c == '=' || c == '<' || c == '>' || c == '!' || c == '+' || c == '*' ||
            c == '/';
 }
 
@@ -146,25 +154,55 @@ Token* tokenize(const char* input) {
             }
             tokens[token_count].value[j] = '\0';
 
-            if (strcmp(tokens[token_count].value, "AND") == 0) {
+            if (strcasecmp(tokens[token_count].value, "AND") == 0) {
                 tokens[token_count].type = TOKEN_AND;
-            } else if (strcmp(tokens[token_count].value, "OR") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "OR") == 0) {
                 tokens[token_count].type = TOKEN_OR;
-            } else if (strcmp(tokens[token_count].value, "NOT") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "NOT") == 0) {
                 tokens[token_count].type = TOKEN_NOT;
-            } else if (strcmp(tokens[token_count].value, "LIKE") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "LIKE") == 0) {
                 tokens[token_count].type = TOKEN_LIKE;
-            } else if (strcmp(tokens[token_count].value, "SUM") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "SUM") == 0) {
                 tokens[token_count].type = TOKEN_AGGREGATE_FUNC;
-            } else if (strcmp(tokens[token_count].value, "COUNT") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "COUNT") == 0) {
                 tokens[token_count].type = TOKEN_AGGREGATE_FUNC;
-            } else if (strcmp(tokens[token_count].value, "AVG") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "AVG") == 0) {
                 tokens[token_count].type = TOKEN_AGGREGATE_FUNC;
-            } else if (strcmp(tokens[token_count].value, "MIN") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "MIN") == 0) {
                 tokens[token_count].type = TOKEN_AGGREGATE_FUNC;
-            } else if (strcmp(tokens[token_count].value, "MAX") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "MAX") == 0) {
                 tokens[token_count].type = TOKEN_AGGREGATE_FUNC;
-            } else if (strcmp(tokens[token_count].value, "DISTINCT") == 0) {
+            } else if (strcasecmp(tokens[token_count].value, "ABS") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "MID") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "LEFT") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "RIGHT") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "UPPER") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "LOWER") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "LENGTH") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "ROUND") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "FLOOR") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "CEIL") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "SQRT") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "MOD") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "POWER") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "SUBSTRING") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "CONCAT") == 0) {
+                tokens[token_count].type = TOKEN_SCALAR_FUNC;
+            } else if (strcasecmp(tokens[token_count].value, "DISTINCT") == 0) {
                 tokens[token_count].type = TOKEN_DISTINCT;
             } else {
                 tokens[token_count].type =

@@ -91,7 +91,7 @@ int main() {
         log_msg(LOG_DEBUG, "IR generation completed successfully");
         
         log_msg(LOG_DEBUG, "Executing IR");
-        execute_ir(ir);
+        exec_ir(ir);
         log_msg(LOG_DEBUG, "IR execution completed");
         
         free_tokens(tokens);

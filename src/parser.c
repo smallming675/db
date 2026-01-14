@@ -1,4 +1,7 @@
 #include <stdio.h>
+#include <strings.h>
+#include <string.h>
+#include <stdlib.h>
 
 #include "db.h"
 #include "logger.h"
@@ -583,26 +586,26 @@ ASTNode* parse(Token* tokens) {
     token_index = 0;
 
     if (match(TOKEN_KEYWORD)) {
-        if (strcmp(current_token->value, "CREATE") == 0) {
+        if (strcasecmp(current_token->value, "CREATE") == 0) {
             advance();
-            if (match(TOKEN_KEYWORD) && strcmp(current_token->value, "TABLE") == 0) {
+            if (strcasecmp(current_token->value, "TABLE") == 0) {
                 advance();
                 log_msg(LOG_DEBUG, "parse: Parsing CREATE TABLE statement");
                 return parse_create_table();
             }
-        } else if (strcmp(current_token->value, "INSERT") == 0) {
+        } else if (strcasecmp(current_token->value, "INSERT") == 0) {
             advance();
             log_msg(LOG_DEBUG, "parse: Parsing INSERT statement");
             return parse_insert();
-        } else if (strcmp(current_token->value, "SELECT") == 0) {
+        } else if (strcasecmp(current_token->value, "SELECT") == 0) {
             advance();
             log_msg(LOG_DEBUG, "parse: Parsing SELECT statement");
             return parse_select();
-        } else if (strcmp(current_token->value, "UPDATE") == 0) {
+        } else if (strcasecmp(current_token->value, "UPDATE") == 0) {
             advance();
             log_msg(LOG_DEBUG, "parse: Parsing UPDATE statement");
             return parse_update();
-        } else if (strcmp(current_token->value, "DELETE") == 0) {
+        } else if (strcasecmp(current_token->value, "DELETE") == 0) {
             advance();
             log_msg(LOG_DEBUG, "parse: Parsing DELETE statement");
             return parse_delete();
