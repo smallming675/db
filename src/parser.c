@@ -204,7 +204,7 @@ static Expr* parse_aggregate_func(void) {
         strcmp(current_token->value, "*") == 0) {
         expr->aggregate.count_all = true;
         expr->aggregate.distinct = false;
-        expr->aggregate.operand = NULL;  // COUNT(*) has no operand
+        expr->aggregate.operand = NULL;  
         advance();
     } else {
         if (match(TOKEN_DISTINCT)) {

@@ -8,19 +8,25 @@ int table_count = 0;
 
 static Table* find_table(const char* name);
 static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name);
-static bool evaluate_expression(const Expr* expr, const Row* row, const TableDef* schema);
-static bool evaluate_comparison(Value left, Value right, OperatorType op);
+static bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema);
+static bool eval_comparison(Value left, Value right, OperatorType op);
 static bool string_to_bool(const char* str);
 static int compare_values(const Value* left, const Value* right);
-static void execute_filter(const IRNode* current);
-static void execute_update_row(const IRNode* current);
-static void execute_delete_row(const IRNode* current);
-static void execute_aggregate(const IRNode* current);
-static void execute_project(const IRNode* current);
-static Value evaluate_select_expression(Expr* expr, const Row* row, const TableDef* schema);
+static void exec_filter(const IRNode* current);
+static void exec_update_row(const IRNode* current);
+static void exec_delete_row(const IRNode* current);
+static void exec_aggregate(const IRNode* current);
+static void exec_project(const IRNode* current);
+static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema);
 static Value compute_aggregate(const char* func_name, AggregateState* state, DataType return_type);
 static void update_aggregate_state(AggregateState* state, Value val, const IRAggregate* agg);
-static bool is_null_value(Value val);
+static bool is_null(Value val);
+static void print_table_header(const TableDef* schema);
+static void print_table_separator(int column_count);
+static void print_row_data(const Row* row, const TableDef* schema);
+static void print_project_header(const IRNode* current, const TableDef* schema);
+static void print_project_separator(const IRNode* current, const TableDef* schema);
+static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema);
 
 static Table* find_table(const char* name) {
     for (int i = 0; i < table_count; i++) {
@@ -77,7 +83,7 @@ static int compare_values(const Value* left, const Value* right) {
     }
 }
 
-static bool evaluate_like_expression(Value left, Value right) {
+static bool eval_like_expression(Value left, Value right) {
     const char* text = left.value;
     const char* pattern = right.value;
     if (strcmp(text, "NULL") == 0 || strcmp(pattern, "NULL") == 0) return false;
@@ -119,7 +125,7 @@ static bool evaluate_like_expression(Value left, Value right) {
     return match;
 }
 
-static bool evaluate_comparison(Value left, Value right, OperatorType op) {
+static bool eval_comparison(Value left, Value right, OperatorType op) {
     int cmp = compare_values(&left, &right);
     switch (op) {
         case OP_EQUALS:
@@ -135,13 +141,13 @@ static bool evaluate_comparison(Value left, Value right, OperatorType op) {
         case OP_GREATER_EQUAL:
             return cmp >= 0;
         case OP_LIKE:
-            return evaluate_like_expression(left, right);
+            return eval_like_expression(left, right);
         default:
             return false;
     }
 }
 
-static bool evaluate_expression(const Expr* expr, const Row* row, const TableDef* schema) {
+static bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
     if (!expr) return true;
 
     switch (expr->type) {
@@ -153,8 +159,8 @@ static bool evaluate_expression(const Expr* expr, const Row* row, const TableDef
             return string_to_bool(expr->value.value);
         }
         case EXPR_BINARY_OP: {
-            bool left_val = evaluate_expression(expr->binary.left, row, schema);
-            bool right_val = evaluate_expression(expr->binary.right, row, schema);
+            bool left_val = eval_expression(expr->binary.left, row, schema);
+            bool right_val = eval_expression(expr->binary.right, row, schema);
 
             switch (expr->binary.op) {
                 case OP_AND:
@@ -171,13 +177,13 @@ static bool evaluate_expression(const Expr* expr, const Row* row, const TableDef
                         expr->binary.right->type == EXPR_VALUE) {
                         Value col_val =
                             get_column_value(row, schema, expr->binary.left->column_name);
-                        return evaluate_comparison(col_val, expr->binary.right->value,
+                        return eval_comparison(col_val, expr->binary.right->value,
                                                    expr->binary.op);
                     } else if (expr->binary.left->type == EXPR_VALUE &&
                                expr->binary.right->type == EXPR_COLUMN) {
                         Value col_val =
                             get_column_value(row, schema, expr->binary.right->column_name);
-                        return evaluate_comparison(expr->binary.left->value, col_val,
+                        return eval_comparison(expr->binary.left->value, col_val,
                                                    expr->binary.op);
                     } else if (expr->binary.left->type == EXPR_COLUMN &&
                                expr->binary.right->type == EXPR_COLUMN) {
@@ -185,7 +191,7 @@ static bool evaluate_expression(const Expr* expr, const Row* row, const TableDef
                             get_column_value(row, schema, expr->binary.left->column_name);
                         Value right_val =
                             get_column_value(row, schema, expr->binary.right->column_name);
-                        return evaluate_comparison(left_val, right_val, expr->binary.op);
+                        return eval_comparison(left_val, right_val, expr->binary.op);
                     }
                     return false;
                 }
@@ -194,7 +200,7 @@ static bool evaluate_expression(const Expr* expr, const Row* row, const TableDef
             }
         }
         case EXPR_UNARY_OP: {
-            bool operand_val = evaluate_expression(expr->unary.operand, row, schema);
+            bool operand_val = eval_expression(expr->unary.operand, row, schema);
             if (expr->unary.op == OP_NOT) {
                 return !operand_val;
             }
@@ -213,21 +219,21 @@ static bool string_to_bool(const char* str) {
     return true;
 }
 
-static void execute_create_table(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_create_table: Creating table: %s",
+static void exec_create_table(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_create_table: Creating table: %s",
             current->create_table.table_def.name);
 
     if (table_count >= MAX_TABLES) {
-        log_msg(LOG_ERROR, "execute_create_table: Maximum number of tables reached");
-        log_msg(LOG_ERROR, "execute_create_table: Cannot create table '%s': maximum tables reached",
+        log_msg(LOG_ERROR, "exec_create_table: Maximum number of tables reached");
+        log_msg(LOG_ERROR, "exec_create_table: Cannot create table '%s': maximum tables reached",
                 current->create_table.table_def.name);
         return;
     }
 
     if (find_table(current->create_table.table_def.name)) {
-        log_msg(LOG_ERROR, "execute_create_table: Table '%s' already exists",
+        log_msg(LOG_ERROR, "exec_create_table: Table '%s' already exists",
                 current->create_table.table_def.name);
-        log_msg(LOG_ERROR, "execute_create_table: Cannot create table '%s': table already exists",
+        log_msg(LOG_ERROR, "exec_create_table: Cannot create table '%s': table already exists",
                 current->create_table.table_def.name);
         return;
     }
@@ -237,37 +243,37 @@ static void execute_create_table(const IRNode* current) {
     table->schema = current->create_table.table_def;
     table->row_count = 0;
 
-    log_msg(LOG_INFO, "execute_create_table: Table '%s' created with %d columns", table->name,
+    log_msg(LOG_INFO, "exec_create_table: Table '%s' created with %d columns", table->name,
             table->schema.column_count);
     table_count++;
 }
 
-static void execute_insert_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_insert_row: Inserting row into table: %s",
+static void exec_insert_row(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_insert_row: Inserting row into table: %s",
             current->insert_row.table_name);
 
     Table* table = find_table(current->insert_row.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_insert_row: Table '%s' does not exist",
+        log_msg(LOG_ERROR, "exec_insert_row: Table '%s' does not exist",
                 current->insert_row.table_name);
         log_msg(LOG_ERROR,
-                "execute_insert_row: Cannot insert into table '%s': table does not exist",
+                "exec_insert_row: Cannot insert into table '%s': table does not exist",
                 current->insert_row.table_name);
         return;
     }
 
     if (table->row_count >= MAX_ROWS) {
-        log_msg(LOG_ERROR, "execute_insert_row: Table is full");
-        log_msg(LOG_ERROR, "execute_insert_row: Cannot insert into table '%s': table is full",
+        log_msg(LOG_ERROR, "exec_insert_row: Table is full");
+        log_msg(LOG_ERROR, "exec_insert_row: Cannot insert into table '%s': table is full",
                 current->insert_row.table_name);
         return;
     }
 
     if (current->insert_row.value_count != table->schema.column_count) {
-        log_msg(LOG_ERROR, "execute_insert_row: Column count mismatch (expected %d, got %d)",
+        log_msg(LOG_ERROR, "exec_insert_row: Column count mismatch (expected %d, got %d)",
                 table->schema.column_count, current->insert_row.value_count);
         log_msg(LOG_ERROR,
-                "execute_insert_row: Cannot insert into table '%s': column count mismatch "
+                "exec_insert_row: Cannot insert into table '%s': column count mismatch "
                 "(expected %d, got %d)",
                 current->insert_row.table_name, table->schema.column_count,
                 current->insert_row.value_count);
@@ -280,59 +286,45 @@ static void execute_insert_row(const IRNode* current) {
         row->is_null[i] = (strcmp(current->insert_row.values[i].value, "NULL") == 0);
     }
 
-    log_msg(LOG_INFO, "execute_insert_row: Row inserted into table '%s' (row %d)",
+    log_msg(LOG_INFO, "exec_insert_row: Row inserted into table '%s' (row %d)",
             current->insert_row.table_name, table->row_count + 1);
     table->row_count++;
 }
 
-static void execute_scan_table(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_scan_table: Scanning table: %s", current->scan_table.table_name);
+static void exec_scan_table(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_scan_table: Scanning table: %s", current->scan_table.table_name);
 
     Table* table = find_table(current->scan_table.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_scan_table: Table '%s' does not exist",
+        log_msg(LOG_ERROR, "exec_scan_table: Table '%s' does not exist",
                 current->scan_table.table_name);
-        log_msg(LOG_ERROR, "execute_scan_table: Cannot scan table '%s': table does not exist",
+        log_msg(LOG_ERROR, "exec_scan_table: Cannot scan table '%s': table does not exist",
                 current->scan_table.table_name);
         return;
     }
 
-    log_msg(LOG_INFO, "execute_scan_table: Displaying table '%s' with %d rows", table->name,
+    log_msg(LOG_INFO, "exec_scan_table: Displaying table '%s' with %d rows", table->name,
             table->row_count);
 
-    for (int i = 0; i < table->schema.column_count; i++) {
-        printf("%-20s", table->schema.columns[i].name);
-    }
-    printf("\n");
-
-    for (int i = 0; i < table->schema.column_count; i++) {
-        printf("%-20s", "--------------------");
-    }
-    printf("\n");
+    print_table_header(&table->schema);
+    print_table_separator(table->schema.column_count);
 
     for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
         Row* row = &table->rows[row_idx];
-        for (int col_idx = 0; col_idx < table->schema.column_count; col_idx++) {
-            if (row->is_null[col_idx]) {
-                printf("%-20s", "NULL");
-            } else {
-                printf("%-20s", row->values[col_idx].value);
-            }
-        }
-        printf("\n");
+        print_row_data(row, &table->schema);
     }
 
     printf("%d rows\n", table->row_count);
 }
 
-static void execute_drop_table(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_drop_table: Dropping table: %s", current->drop_table.table_name);
+static void exec_drop_table(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_drop_table: Dropping table: %s", current->drop_table.table_name);
 
     Table* table = find_table(current->drop_table.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_drop_table: Table '%s' does not exist",
+        log_msg(LOG_ERROR, "exec_drop_table: Table '%s' does not exist",
                 current->drop_table.table_name);
-        log_msg(LOG_ERROR, "execute_drop_table: Cannot drop table '%s': table does not exist",
+        log_msg(LOG_ERROR, "exec_drop_table: Cannot drop table '%s': table does not exist",
                 current->drop_table.table_name);
         return;
     }
@@ -343,46 +335,32 @@ static void execute_drop_table(const IRNode* current) {
     }
     table_count--;
 
-    log_msg(LOG_INFO, "execute_drop_table: Table '%s' dropped", current->drop_table.table_name);
-    log_msg(LOG_INFO, "execute_drop_table: Table '%s' dropped successfully",
+    log_msg(LOG_INFO, "exec_drop_table: Table '%s' dropped", current->drop_table.table_name);
+    log_msg(LOG_INFO, "exec_drop_table: Table '%s' dropped successfully",
             current->drop_table.table_name);
 }
 
-static void execute_filter(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_filter: Filtering table: %s", current->filter.table_name);
+static void exec_filter(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_filter: Filtering table: %s", current->filter.table_name);
 
     Table* table = find_table(current->filter.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_filter: Table '%s' does not exist", current->filter.table_name);
-        log_msg(LOG_ERROR, "execute_filter: Cannot filter table '%s': table does not exist",
+        log_msg(LOG_ERROR, "exec_filter: Table '%s' does not exist", current->filter.table_name);
+        log_msg(LOG_ERROR, "exec_filter: Cannot filter table '%s': table does not exist",
                 current->filter.table_name);
         return;
     }
 
-    log_msg(LOG_INFO, "execute_filter: Displaying filtered table '%s'", table->name);
+    log_msg(LOG_INFO, "exec_filter: Displaying filtered table '%s'", table->name);
 
-    for (int i = 0; i < table->schema.column_count; i++) {
-        printf("%-20s", table->schema.columns[i].name);
-    }
-    printf("\n");
-
-    for (int i = 0; i < table->schema.column_count; i++) {
-        printf("%-20s", "--------------------");
-    }
-    printf("\n");
+    print_table_header(&table->schema);
+    print_table_separator(table->schema.column_count);
 
     int matching_rows = 0;
     for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
         Row* row = &table->rows[row_idx];
-        if (evaluate_expression(current->filter.filter_expr, row, &table->schema)) {
-            for (int col_idx = 0; col_idx < table->schema.column_count; col_idx++) {
-                if (row->is_null[col_idx]) {
-                    printf("%-20s", "NULL");
-                } else {
-                    printf("%-20s", row->values[col_idx].value);
-                }
-            }
-            printf("\n");
+        if (eval_expression(current->filter.filter_expr, row, &table->schema)) {
+            print_row_data(row, &table->schema);
             matching_rows++;
         }
     }
@@ -390,15 +368,15 @@ static void execute_filter(const IRNode* current) {
     printf("%d rows (filtered)\n", matching_rows);
 }
 
-static void execute_update_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_update_row: Updating rows in table: %s",
+static void exec_update_row(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_update_row: Updating rows in table: %s",
             current->update_row.table_name);
 
     Table* table = find_table(current->update_row.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_update_row: Table '%s' does not exist",
+        log_msg(LOG_ERROR, "exec_update_row: Table '%s' does not exist",
                 current->update_row.table_name);
-        log_msg(LOG_ERROR, "execute_update_row: Cannot update table '%s': table does not exist",
+        log_msg(LOG_ERROR, "exec_update_row: Cannot update table '%s': table does not exist",
                 current->update_row.table_name);
         return;
     }
@@ -408,7 +386,7 @@ static void execute_update_row(const IRNode* current) {
         Row* row = &table->rows[row_idx];
 
         if (!current->update_row.where_clause ||
-            evaluate_expression(current->update_row.where_clause, row, &table->schema)) {
+            eval_expression(current->update_row.where_clause, row, &table->schema)) {
             for (int i = 0; i < current->update_row.value_count; i++) {
                 for (int col_idx = 0; col_idx < table->schema.column_count; col_idx++) {
                     if (strcmp(table->schema.columns[col_idx].name,
@@ -423,17 +401,17 @@ static void execute_update_row(const IRNode* current) {
             }
         }
     }
-    log_msg(LOG_INFO, "execute_update_row: Updated %d rows in table '%s'", updated_rows,
+    log_msg(LOG_INFO, "exec_update_row: Updated %d rows in table '%s'", updated_rows,
             current->update_row.table_name);
 }
 
-static void execute_aggregate(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_aggregate: Computing aggregate: %s",
+static void exec_aggregate(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_aggregate: Computing aggregate: %s",
             current->aggregate.aggregate_func);
 
     Table* table = find_table(current->aggregate.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_aggregate: Table '%s' does not exist",
+        log_msg(LOG_ERROR, "exec_aggregate: Table '%s' does not exist",
                 current->aggregate.table_name);
         return;
     }
@@ -447,10 +425,10 @@ static void execute_aggregate(const IRNode* current) {
         state.count = table->row_count;
     } else {
         for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
-            Value val = evaluate_select_expression(current->aggregate.operand,
+            Value val = eval_select_expression(current->aggregate.operand,
                                                    &table->rows[row_idx], &table->schema);
             update_aggregate_state(&state, val, &current->aggregate);
-            if (current->aggregate.distinct && !is_null_value(val)) {
+            if (current->aggregate.distinct && !is_null(val)) {
                 for (int i = 0; i < state.distinct_count - 1; i++) {
                     if (state.seen_values[i]) {
                         free(state.seen_values[i]);
@@ -473,17 +451,57 @@ static void execute_aggregate(const IRNode* current) {
     }
 }
 
-static void execute_project(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_project: Projecting expressions for table: %s",
+static void exec_project(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_project: Projecting expressions for table: %s",
             current->project.table_name);
 
     Table* table = find_table(current->project.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_project: Table '%s' does not exist",
+        log_msg(LOG_ERROR, "exec_project: Table '%s' does not exist",
                 current->project.table_name);
         return;
     }
 
+    print_project_header(current, &table->schema);
+    print_project_separator(current, &table->schema);
+
+    int rows_processed = 0;
+    for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
+        print_project_row(current, &table->rows[row_idx], &table->schema);
+        rows_processed++;
+    }
+
+    printf("%d rows\n", rows_processed);
+}
+
+static bool is_null(Value val) { return strcmp(val.value, "NULL") == 0; }
+
+static void print_table_header(const TableDef* schema) {
+    for (int i = 0; i < schema->column_count; i++) {
+        printf("%-20s", schema->columns[i].name);
+    }
+    printf("\n");
+}
+
+static void print_table_separator(int column_count) {
+    for (int i = 0; i < column_count; i++) {
+        printf("%-20s", "--------------------");
+    }
+    printf("\n");
+}
+
+static void print_row_data(const Row* row, const TableDef* schema) {
+    for (int col_idx = 0; col_idx < schema->column_count; col_idx++) {
+        if (row->is_null[col_idx]) {
+            printf("%-20s", "NULL");
+        } else {
+            printf("%-20s", row->values[col_idx].value);
+        }
+    }
+    printf("\n");
+}
+
+static void print_project_header(const IRNode* current, const TableDef* schema) {
     for (int i = 0; i < current->project.expression_count; i++) {
         if (current->project.expressions[i]->type == EXPR_COLUMN) {
             printf("%-20s", current->project.expressions[i]->column_name);
@@ -491,8 +509,8 @@ static void execute_project(const IRNode* current) {
             printf("%-20s", current->project.expressions[i]->aggregate.func_name);
         } else if (current->project.expressions[i]->type == EXPR_VALUE &&
                    strcmp(current->project.expressions[i]->value.value, "*") == 0) {
-            for (int j = 0; j < table->schema.column_count; j++) {
-                printf("%-20s", table->schema.columns[j].name);
+            for (int j = 0; j < schema->column_count; j++) {
+                printf("%-20s", schema->columns[j].name);
             }
             break;
         } else {
@@ -500,11 +518,13 @@ static void execute_project(const IRNode* current) {
         }
     }
     printf("\n");
+}
 
+static void print_project_separator(const IRNode* current, const TableDef* schema) {
     for (int i = 0; i < current->project.expression_count; i++) {
         if (current->project.expressions[i]->type == EXPR_VALUE &&
             strcmp(current->project.expressions[i]->value.value, "*") == 0) {
-            for (int j = 0; j < table->schema.column_count; j++) {
+            for (int j = 0; j < schema->column_count; j++) {
                 printf("%-20s", "--------------------");
             }
             break;
@@ -513,41 +533,35 @@ static void execute_project(const IRNode* current) {
         }
     }
     printf("\n");
-
-    int rows_processed = 0;
-    for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
-        for (int col_idx = 0; col_idx < current->project.expression_count; col_idx++) {
-            if (current->project.expressions[col_idx]->type == EXPR_VALUE &&
-                strcmp(current->project.expressions[col_idx]->value.value, "*") == 0) {
-                for (int j = 0; j < table->schema.column_count; j++) {
-                    if (table->rows[row_idx].is_null[j]) {
-                        printf("%-20s", "NULL");
-                    } else {
-                        printf("%-20s", table->rows[row_idx].values[j].value);
-                    }
-                }
-                break;
-            } else {
-                Value val = evaluate_select_expression(current->project.expressions[col_idx],
-                                                       &table->rows[row_idx], &table->schema);
-
-                if (is_null_value(val)) {
-                    printf("%-20s", "NULL");
-                } else {
-                    printf("%-20s", val.value);
-                }
-            }
-        }
-        printf("\n");
-        rows_processed++;
-    }
-
-    printf("%d rows\n", rows_processed);
 }
 
-static bool is_null_value(Value val) { return strcmp(val.value, "NULL") == 0; }
+static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema) {
+    for (int col_idx = 0; col_idx < current->project.expression_count; col_idx++) {
+        if (current->project.expressions[col_idx]->type == EXPR_VALUE &&
+            strcmp(current->project.expressions[col_idx]->value.value, "*") == 0) {
+            for (int j = 0; j < schema->column_count; j++) {
+                if (row->is_null[j]) {
+                    printf("%-20s", "NULL");
+                } else {
+                    printf("%-20s", row->values[j].value);
+                }
+            }
+            break;
+        } else {
+            Value val = eval_select_expression(current->project.expressions[col_idx],
+                                                   row, schema);
+
+            if (is_null(val)) {
+                printf("%-20s", "NULL");
+            } else {
+                printf("%-20s", val.value);
+            }
+        }
+    }
+    printf("\n");
+}
 static void update_aggregate_state(AggregateState* state, Value val, const IRAggregate* agg) {
-    if (is_null_value(val)) {
+    if (is_null(val)) {
         return;  // Skip NULL values
     }
 
@@ -655,7 +669,7 @@ static Value compute_aggregate(const char* func_name, AggregateState* state, Dat
     return result;
 }
 
-static Value evaluate_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
+static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
     if (!expr) {
         Value null_val;
         strcpy(null_val.value, "NULL");
@@ -670,7 +684,7 @@ static Value evaluate_select_expression(Expr* expr, const Row* row, const TableD
             return expr->value;
         case EXPR_AGGREGATE_FUNC:
             log_msg(LOG_WARN,
-                    "evaluate_select_expression: Aggregate function in expression evaluation");
+                    "eval_select_expression: Aggregate function in expression evaluation");
             {
                 Value error_val;
                 strcpy(error_val.value, "ERROR");
@@ -686,16 +700,16 @@ static Value evaluate_select_expression(Expr* expr, const Row* row, const TableD
     }
 }
 
-static void execute_delete_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "execute_delete_row: Deleting rows from table: %s",
+static void exec_delete_row(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_delete_row: Deleting rows from table: %s",
             current->delete_row.table_name);
 
     Table* table = find_table(current->delete_row.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "execute_delete_row: Table '%s' does not exist",
+        log_msg(LOG_ERROR, "exec_delete_row: Table '%s' does not exist",
                 current->delete_row.table_name);
         log_msg(LOG_ERROR,
-                "execute_delete_row: Cannot delete from table '%s': table does not exist",
+                "exec_delete_row: Cannot delete from table '%s': table does not exist",
                 current->delete_row.table_name);
         return;
     }
@@ -707,7 +721,7 @@ static void execute_delete_row(const IRNode* current) {
         Row* row = &table->rows[read_idx];
 
         if (!current->delete_row.where_clause ||
-            !evaluate_expression(current->delete_row.where_clause, row, &table->schema)) {
+            !eval_expression(current->delete_row.where_clause, row, &table->schema)) {
             if (read_idx != write_idx) {
                 table->rows[write_idx] = table->rows[read_idx];
             }
@@ -719,64 +733,64 @@ static void execute_delete_row(const IRNode* current) {
 
     table->row_count = write_idx;
 
-    log_msg(LOG_INFO, "execute_delete_row: Deleted %d rows from table '%s'", deleted_rows,
+    log_msg(LOG_INFO, "exec_delete_row: Deleted %d rows from table '%s'", deleted_rows,
             current->delete_row.table_name);
 }
 
-void execute_ir(IRNode* ir) {
+void exec_ir(IRNode* ir) {
     if (!ir) {
-        log_msg(LOG_WARN, "execute_ir: Called with NULL IR");
+        log_msg(LOG_WARN, "exec_ir: Called with NULL IR");
         return;
     }
 
-    log_msg(LOG_DEBUG, "execute_ir: executing IR");
+    log_msg(LOG_DEBUG, "exec_ir: executing IR");
 
     IRNode* current = ir;
     while (current) {
         switch (current->type) {
             case IR_CREATE_TABLE:
-                execute_create_table(current);
+                exec_create_table(current);
                 break;
 
             case IR_INSERT_ROW:
-                execute_insert_row(current);
+                exec_insert_row(current);
                 break;
 
             case IR_SCAN_TABLE:
-                execute_scan_table(current);
+                exec_scan_table(current);
                 break;
 
             case IR_FILTER:
-                execute_filter(current);
+                exec_filter(current);
                 break;
 
             case IR_DROP_TABLE:
-                execute_drop_table(current);
+                exec_drop_table(current);
                 break;
 
             case IR_UPDATE_ROW:
-                execute_update_row(current);
+                exec_update_row(current);
                 break;
 
             case IR_DELETE_ROW:
-                execute_delete_row(current);
+                exec_delete_row(current);
                 break;
 
             case IR_AGGREGATE:
-                execute_aggregate(current);
+                exec_aggregate(current);
                 break;
 
             case IR_PROJECT:
-                execute_project(current);
+                exec_project(current);
                 break;
 
             default:
-                log_msg(LOG_WARN, "execute_ir: Unknown IR node type: %d", current->type);
+                log_msg(LOG_WARN, "exec_ir: Unknown IR node type: %d", current->type);
                 break;
         }
 
         current = current->next;
     }
 
-    log_msg(LOG_DEBUG, "execute_ir: IR execution completed");
+    log_msg(LOG_DEBUG, "exec_ir: IR execution completed");
 }

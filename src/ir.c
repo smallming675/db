@@ -107,7 +107,6 @@ IRNode* ast_to_ir(ASTNode* ast) {
                         }
                     }
 
-                    // Add PROJECT node for expression evaluation
                     IRNode* project_ir = malloc(sizeof(IRNode));
                     if (project_ir) {
                         project_ir->type = IR_PROJECT;

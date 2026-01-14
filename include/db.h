@@ -26,18 +26,18 @@ typedef enum {
   TOKEN_RPAREN,
   TOKEN_EOF,
   TOKEN_ERROR,
-  TOKEN_EQUALS,        // =
-  TOKEN_NOT_EQUALS,    // !=
-  TOKEN_LESS,          // <
-  TOKEN_LESS_EQUAL,    // <=
-  TOKEN_GREATER,       // >
-  TOKEN_GREATER_EQUAL, // >=
+  TOKEN_EQUALS,        
+  TOKEN_NOT_EQUALS,    
+  TOKEN_LESS,          
+  TOKEN_LESS_EQUAL,    
+  TOKEN_GREATER,       
+  TOKEN_GREATER_EQUAL, 
   TOKEN_AND,
   TOKEN_OR,
   TOKEN_NOT,
   TOKEN_LIKE,
-  TOKEN_AGGREGATE_FUNC, // NEW: for SUM, COUNT, etc.
-  TOKEN_DISTINCT        // NEW: for DISTINCT keyword
+  TOKEN_AGGREGATE_FUNC, 
+  TOKEN_DISTINCT       
 } TokenType;
 
 typedef struct {
@@ -83,7 +83,7 @@ typedef enum {
   EXPR_VALUE,
   EXPR_BINARY_OP,
   EXPR_UNARY_OP,
-  EXPR_AGGREGATE_FUNC // NEW: for aggregate functions
+  EXPR_AGGREGATE_FUNC 
 } ExprType;
 
 typedef enum {
@@ -114,11 +114,11 @@ typedef struct Expr {
       struct Expr *operand;
     } unary;
     struct {
-      char func_name[16];   // "SUM", "COUNT", "AVG", "MIN", "MAX"
-      struct Expr *operand; // Column or expression
-      bool distinct;        // For COUNT(DISTINCT...)
-      bool count_all;       // For COUNT(*)
-    } aggregate;            // NEW: aggregate function support
+      char func_name[16];   
+      struct Expr *operand; 
+      bool distinct;       
+      bool count_all;     
+    } aggregate;         
   };
 } Expr;
 
@@ -134,8 +134,8 @@ typedef struct {
 
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
-  Expr *expressions[MAX_COLUMNS]; // NEW: Instead of char* columns
-  int expression_count;           // NEW: Instead of column_count
+  Expr *expressions[MAX_COLUMNS]; 
+  int expression_count;          
   Expr *where_clause;
 } SelectNode;
 
@@ -176,8 +176,8 @@ typedef enum {
   IR_UPDATE_ROW,
   IR_DELETE_ROW,
   IR_FILTER,
-  IR_AGGREGATE, // NEW: for aggregate operations
-  IR_PROJECT    // NEW: for projection operations
+  IR_AGGREGATE, 
+  IR_PROJECT   
 } IRType;
 
 typedef struct {
@@ -217,17 +217,17 @@ typedef struct {
 
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
-  char aggregate_func[16]; // "SUM", "COUNT", "AVG", "MIN", "MAX"
-  Expr *operand;           // Column or expression to aggregate
-  bool distinct;           // For COUNT(DISTINCT...)
-  bool count_all;          // For COUNT(*)
-} IRAggregate;             // NEW: aggregate operation
+  char aggregate_func[16]; 
+  Expr *operand;           
+  bool distinct;           
+  bool count_all;          
+} IRAggregate;             
 
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
-  Expr *expressions[MAX_COLUMNS]; // Expressions to project (display)
+  Expr *expressions[MAX_COLUMNS]; 
   int expression_count;
-} IRProject; // NEW: projection operation
+} IRProject; 
 
 typedef struct IRNode {
   IRType type;
@@ -239,8 +239,8 @@ typedef struct IRNode {
     IRUpdateRow update_row;
     IRDeleteRow delete_row;
     IRFilter filter;
-    IRAggregate aggregate; // NEW: aggregate operation
-    IRProject project;     // NEW: projection operation
+    IRAggregate aggregate; 
+    IRProject project;     
   };
   struct IRNode *next;
 } IRNode;
@@ -257,7 +257,7 @@ typedef struct {
   int row_count;
 } Table;
 
-// NEW: Aggregate computation state for execution
+
 typedef struct {
   double sum;
   int count;
@@ -270,10 +270,10 @@ typedef struct {
 } AggregateState;
 
 Token *tokenize(const char *input);
-// static const char *token_type_name(TokenType type);
+
 ASTNode *parse(Token *tokens);
 IRNode *ast_to_ir(ASTNode *ast);
-void execute_ir(IRNode *ir);
+void exec_ir(IRNode *ir);
 void free_tokens(Token *tokens);
 void free_ast(ASTNode *ast);
 void free_ir(IRNode *ir);
