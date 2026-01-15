@@ -14,5 +14,6 @@ void exec_drop_table(const IRNode* current);
 void print_table_header(const TableDef* schema);
 void print_table_separator(int column_count);
 void print_row_data(const Row* row, const TableDef* schema);
+void copy_row(Row* dst, const Row* src, int column_count);
 
 #endif

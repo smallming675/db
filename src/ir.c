@@ -106,11 +106,31 @@ IRNode* ast_to_ir(ASTNode* ast) {
                         }
                     }
 
+                    IRNode* sort_ir = NULL;
+                    if (current->select.order_by_count > 0) {
+                        log_msg(LOG_DEBUG, "ast_to_ir: Adding SORT node for %d order_by columns",
+                                current->select.order_by_count);
+                        sort_ir = malloc(sizeof(IRNode));
+                        if (sort_ir) {
+                            sort_ir->type = IR_SORT;
+                            strcpy(sort_ir->sort.table_name, current->select.table_name);
+                            sort_ir->sort.order_by_count = current->select.order_by_count;
+                            for (int i = 0; i < current->select.order_by_count; i++) {
+                                sort_ir->sort.order_by[i] = current->select.order_by[i];
+                                sort_ir->sort.order_by_desc[i] = current->select.order_by_desc[i];
+                            }
+                            sort_ir->next = NULL;
+                            current_ir->next = sort_ir;
+                            current_ir = sort_ir;
+                        }
+                    }
+
                     IRNode* project_ir = malloc(sizeof(IRNode));
                     if (project_ir) {
                         project_ir->type = IR_PROJECT;
                         strcpy(project_ir->project.table_name, current->select.table_name);
                         project_ir->project.expression_count = current->select.expression_count;
+                        project_ir->project.limit = current->select.limit;
                         for (int i = 0; i < current->select.expression_count; i++) {
                             project_ir->project.expressions[i] = current->select.expressions[i];
                         }

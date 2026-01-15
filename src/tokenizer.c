@@ -29,16 +29,18 @@ static const KeywordMap keywords[] = {
     {"FROM", TOKEN_KEYWORD}, {"DROP", TOKEN_KEYWORD}, {"INT", TOKEN_KEYWORD},
     {"STRING", TOKEN_KEYWORD}, {"FLOAT", TOKEN_KEYWORD}, {"NULL", TOKEN_KEYWORD},
     {"WHERE", TOKEN_KEYWORD}, {"UPDATE", TOKEN_KEYWORD}, {"SET", TOKEN_KEYWORD},
-    {"DELETE", TOKEN_KEYWORD}, {"DISTINCT", TOKEN_KEYWORD}, {"TIME", TOKEN_TIME},
+    {"DELETE", TOKEN_KEYWORD}, {"DISTINCT", TOKEN_DISTINCT}, {"TIME", TOKEN_TIME},
     {"DATE", TOKEN_DATE}, {"AND", TOKEN_AND}, {"OR", TOKEN_OR},
-    {"NOT", TOKEN_NOT}, {"LIKE", TOKEN_LIKE}, {"SUM", TOKEN_AGGREGATE_FUNC},
+    {"NOT", TOKEN_NOT}, {"LIKE", TOKEN_LIKE}, {"ORDER", TOKEN_ORDER},
+    {"BY", TOKEN_BY}, {"LIMIT", TOKEN_KEYWORD}, {"ASC", TOKEN_KEYWORD},
+    {"DESC", TOKEN_KEYWORD}, {"SUM", TOKEN_AGGREGATE_FUNC},
     {"COUNT", TOKEN_AGGREGATE_FUNC}, {"AVG", TOKEN_AGGREGATE_FUNC}, {"MIN", TOKEN_AGGREGATE_FUNC},
     {"MAX", TOKEN_AGGREGATE_FUNC}, {"ABS", TOKEN_SCALAR_FUNC}, {"MID", TOKEN_SCALAR_FUNC},
     {"LEFT", TOKEN_SCALAR_FUNC}, {"RIGHT", TOKEN_SCALAR_FUNC}, {"UPPER", TOKEN_SCALAR_FUNC},
     {"LOWER", TOKEN_SCALAR_FUNC}, {"LENGTH", TOKEN_SCALAR_FUNC}, {"ROUND", TOKEN_SCALAR_FUNC},
     {"FLOOR", TOKEN_SCALAR_FUNC}, {"CEIL", TOKEN_SCALAR_FUNC}, {"SQRT", TOKEN_SCALAR_FUNC},
     {"MOD", TOKEN_SCALAR_FUNC}, {"POWER", TOKEN_SCALAR_FUNC}, {"SUBSTRING", TOKEN_SCALAR_FUNC},
-    {"CONCAT", TOKEN_SCALAR_FUNC}
+    {"CONCAT", TOKEN_SCALAR_FUNC}, {"AS", TOKEN_AS}
 };
 
 static const OperatorMap operators[] = {
@@ -84,6 +86,41 @@ static int tokenize_string(const char* input, int i, Token* tokens, int* token_c
     if (i < len && input[i] == quote) i++;
     
     tokens[*token_count].value[j] = '\0';
+    
+    // DATE (YYYY-MM-DD)
+    if (j == 10 && tokens[*token_count].value[4] == '-' && tokens[*token_count].value[7] == '-') {
+        bool is_date = true;
+        for (int k = 0; k < 10; k++) {
+            if (k == 4 || k == 7) continue;
+            if (!isdigit(tokens[*token_count].value[k])) {
+                is_date = false;
+                break;
+            }
+        }
+        if (is_date) {
+            tokens[*token_count].type = TOKEN_DATE;
+            (*token_count)++;
+            return i;
+        }
+    }
+    
+    // TIME (HH:MM:SS)
+    if (j == 8 && tokens[*token_count].value[2] == ':' && tokens[*token_count].value[5] == ':') {
+        bool is_time = true;
+        for (int k = 0; k < 8; k++) {
+            if (k == 2 || k == 5) continue;
+            if (!isdigit(tokens[*token_count].value[k])) {
+                is_time = false;
+                break;
+            }
+        }
+        if (is_time) {
+            tokens[*token_count].type = TOKEN_TIME;
+            (*token_count)++;
+            return i;
+        }
+    }
+    
     tokens[*token_count].type = TOKEN_STRING;
     (*token_count)++;
     return i;
@@ -186,6 +223,24 @@ Token* tokenize(const char* input) {
             i++;
         } else if (input[i] == '\'' || input[i] == '"') {
             i = tokenize_string(input, i, tokens, &token_count);
+        } else if (input[i] == '-' && (isdigit(input[i + 1]) || (input[i + 1] == '.' && isdigit(input[i + 2])))) {
+            char neg_value[32];
+            int j = 1;
+            int len = strlen(input);
+            bool has_dot = false;
+            
+            neg_value[0] = '-';
+            i++; 
+            
+            while (i < len && (isdigit(input[i]) || (input[i] == '.' && !has_dot)) && j < 30) {
+                if (input[i] == '.') has_dot = true;
+                neg_value[j++] = input[i++];
+            }
+            neg_value[j] = '\0';
+            
+            strcpy(tokens[token_count].value, neg_value);
+            tokens[token_count].type = TOKEN_NUMBER;
+            (token_count)++;
         } else if (isdigit(input[i]) || (input[i] == '.' && isdigit(input[i + 1]))) {
             i = tokenize_number(input, i, tokens, &token_count);
         } else if (is_operator_char(input[i])) {

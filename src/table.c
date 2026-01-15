@@ -8,6 +8,25 @@ int table_count = 0;
 
 static Table* find_table(const char* name);
 
+static Value copy_value(const Value* src) {
+    Value dst = *src;
+    if (src->type == TYPE_STRING && src->char_val != NULL) {
+        dst.char_val = malloc(strlen(src->char_val) + 1);
+        if (dst.char_val) {
+            strcpy(dst.char_val, src->char_val);
+        }
+    }
+    return dst;
+}
+
+/* avoid dangling pointers */
+void copy_row(Row* dst, const Row* src, int column_count) {
+    for (int i = 0; i < column_count; i++) {
+        dst->values[i] = copy_value(&src->values[i]);
+        dst->is_null[i] = src->is_null[i];
+    }
+}
+
 static Table* find_table(const char* name) {
     for (int i = 0; i < table_count; i++) {
         if (strcmp(tables[i].name, name) == 0) {
@@ -56,10 +75,16 @@ void exec_insert_row(const IRNode* current) {
 
     Table* table = find_table(current->insert_row.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_insert_row: Table '%s' does not exist",
-                current->insert_row.table_name);
-        log_msg(LOG_ERROR, "exec_insert_row: Cannot insert into table '%s': table does not exist",
-                current->insert_row.table_name);
+        char suggestion[256];
+        const char *table_names[MAX_TABLES];
+        for (int i = 0; i < table_count; i++) {
+            table_names[i] = tables[i].name;
+        }
+        suggest_similar(current->insert_row.table_name, table_names, table_count, suggestion, sizeof(suggestion));
+        show_prominent_error("Table '%s' does not exist", current->insert_row.table_name);
+        if (strlen(suggestion) > 0) {
+            printf("  %s\n", suggestion);
+        }
         return;
     }
 
@@ -83,7 +108,7 @@ void exec_insert_row(const IRNode* current) {
 
     Row* row = &table->rows[table->row_count];
     for (int i = 0; i < current->insert_row.value_count; i++) {
-        row->values[i] = current->insert_row.values[i];
+        row->values[i] = copy_value(&current->insert_row.values[i]);
         row->is_null[i] = is_null(&current->insert_row.values[i]);
     }
 
@@ -92,39 +117,24 @@ void exec_insert_row(const IRNode* current) {
     table->row_count++;
 }
 
+/* Validate table exists */
 void exec_scan_table(const IRNode* current) {
     log_msg(LOG_DEBUG, "exec_scan_table: Scanning table: %s", current->scan_table.table_name);
 
     Table* table = find_table(current->scan_table.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_scan_table: Table '%s' does not exist",
-                current->scan_table.table_name);
-        log_msg(LOG_ERROR, "exec_scan_table: Cannot scan table '%s': table does not exist",
-                current->scan_table.table_name);
+        char suggestion[256];
+        const char *table_names[MAX_TABLES];
+        for (int i = 0; i < table_count; i++) {
+            table_names[i] = tables[i].name;
+        }
+        suggest_similar(current->scan_table.table_name, table_names, table_count, suggestion, sizeof(suggestion));
+        show_prominent_error("Table '%s' does not exist", current->scan_table.table_name);
+        if (strlen(suggestion) > 0) {
+            printf("  %s\n", suggestion);
+        }
         return;
     }
-
-    log_msg(LOG_INFO, "exec_scan_table: Displaying table '%s' with %d rows", table->name,
-            table->row_count);
-
-    print_table_header(&table->schema);
-
-    for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
-        Row* row = &table->rows[row_idx];
-        print_row_data(row, &table->schema);
-    }
-    
-    // Bottom border
-    printf("└");
-    for (int i = 0; i < table->schema.column_count; i++) {
-        for (int j = 0; j < 20; j++) {
-            printf("─");
-        }
-        if (i < table->schema.column_count - 1) {
-            printf("┴");
-        }
-    }
-    printf("┘\n");
 }
 
 void exec_drop_table(const IRNode* current) {
@@ -132,10 +142,16 @@ void exec_drop_table(const IRNode* current) {
 
     Table* table = find_table(current->drop_table.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_drop_table: Table '%s' does not exist",
-                current->drop_table.table_name);
-        log_msg(LOG_ERROR, "exec_drop_table: Cannot drop table '%s': table does not exist",
-                current->drop_table.table_name);
+        char suggestion[256];
+        const char *table_names[MAX_TABLES];
+        for (int i = 0; i < table_count; i++) {
+            table_names[i] = tables[i].name;
+        }
+        suggest_similar(current->drop_table.table_name, table_names, table_count, suggestion, sizeof(suggestion));
+        show_prominent_error("Table '%s' does not exist", current->drop_table.table_name);
+        if (strlen(suggestion) > 0) {
+            printf("  %s\n", suggestion);
+        }
         return;
     }
 
@@ -164,7 +180,10 @@ void print_table_header(const TableDef* schema) {
     
     printf("│");
     for (int i = 0; i < schema->column_count; i++) {
-        printf("%-20s", schema->columns[i].name);
+        int len = strlen(schema->columns[i].name);
+        int padding = 20 - len;
+        int left_pad = padding / 2;
+        printf("%*s%s%*s", left_pad, "", schema->columns[i].name, 20 - left_pad - len, "");
         printf("│");
     }
     printf("\n");
@@ -198,9 +217,13 @@ void print_row_data(const Row* row, const TableDef* schema) {
     printf("│");
     for (int col_idx = 0; col_idx < schema->column_count; col_idx++) {
         if (row->is_null[col_idx]) {
-            printf("%-20s", "NULL");
+            printf("%9s%10s", "", "NULL");
         } else {
-            printf("%-20s", repr(&row->values[col_idx]));
+            const char* val_str = repr(&row->values[col_idx]);
+            int len = strlen(val_str);
+            int padding = 20 - len;
+            int left_pad = padding / 2;
+            printf("%*s%s%*s", left_pad, "", val_str, 20 - left_pad - len, "");
         }
         printf("│");
     }

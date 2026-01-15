@@ -40,7 +40,10 @@ typedef enum {
   TOKEN_SCALAR_FUNC,
   TOKEN_DISTINCT,
   TOKEN_TIME,
-  TOKEN_DATE       
+  TOKEN_DATE,
+  TOKEN_ORDER,
+  TOKEN_BY,
+  TOKEN_AS
 } TokenType;
 
 typedef struct {
@@ -81,6 +84,39 @@ typedef struct {
   ColumnDef columns[MAX_COLUMNS];
   int column_count;
 } TableDef;
+
+typedef enum {
+  PARSE_ERROR_NONE = 0,
+  PARSE_ERROR_UNEXPECTED_TOKEN,
+  PARSE_ERROR_MISSING_TOKEN,
+  PARSE_ERROR_INVALID_SYNTAX,
+  PARSE_ERROR_UNTERMINATED_STRING,
+  PARSE_ERROR_INVALID_NUMBER,
+  PARSE_ERROR_UNEXPECTED_END,
+  PARSE_ERROR_TOO_MANY_COLUMNS,
+  PARSE_ERROR_MAX
+} ParseErrorCode;
+
+typedef struct {
+  ParseErrorCode code;
+  char message[1024];
+  char expected[512];
+  char found[256];
+  int line;
+  int column;
+  int token_index;
+  char input[1024];
+  char suggestion[512];
+} ParseError;
+
+typedef struct {
+  char input[1024];
+  Token* tokens;
+  int token_count;
+  int current_token_index;
+  ParseError error;
+  bool error_occurred;
+} ParseContext;
 
 typedef enum {
   AST_CREATE_TABLE,
@@ -126,7 +162,12 @@ typedef enum {
   OP_AND,
   OP_OR,
   OP_NOT,
-  OP_LIKE
+  OP_LIKE,
+  OP_ADD,
+  OP_SUBTRACT,
+  OP_MULTIPLY,
+  OP_DIVIDE,
+  OP_MODULUS
 } OperatorType;
 
 typedef enum { 
@@ -156,6 +197,7 @@ typedef enum {
 
 typedef struct Expr {
   ExprType type;
+  char alias[MAX_COLUMN_NAME_LEN];
   union {
     char column_name[MAX_COLUMN_NAME_LEN];
     Value value;
@@ -197,6 +239,10 @@ typedef struct {
   Expr *expressions[MAX_COLUMNS];
   int expression_count;
   Expr *where_clause;
+  Expr *order_by[MAX_COLUMNS];
+  bool order_by_desc[MAX_COLUMNS];
+  int order_by_count;
+  int limit;
 } SelectNode;
 
 typedef struct {
@@ -237,7 +283,8 @@ typedef enum {
   IR_DELETE_ROW,
   IR_FILTER,
   IR_AGGREGATE,
-  IR_PROJECT
+  IR_PROJECT,
+  IR_SORT
 } IRType;
 
 typedef struct {
@@ -287,7 +334,15 @@ typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
   Expr *expressions[MAX_COLUMNS];
   int expression_count;
+  int limit;
 } IRProject;
+
+typedef struct {
+  char table_name[MAX_TABLE_NAME_LEN];
+  Expr *order_by[MAX_COLUMNS];
+  bool order_by_desc[MAX_COLUMNS];
+  int order_by_count;
+} IRSort;
 
 typedef struct IRNode {
   IRType type;
@@ -301,6 +356,7 @@ typedef struct IRNode {
     IRFilter filter;
     IRAggregate aggregate;
     IRProject project;
+    IRSort sort;
   };
   struct IRNode *next;
 } IRNode;
@@ -330,7 +386,16 @@ typedef struct {
 
 Token *tokenize(const char *input);
 
+void parse_error_init(ParseContext* ctx, const char* input, Token* tokens, int token_count);
+void parse_error_set(ParseContext* ctx, ParseErrorCode code, const char* message,
+                     const char* expected, const char* found, const char* suggestion);
+void parse_error_report(ParseContext* ctx);
+const char* parse_error_code_str(ParseErrorCode code);
+
+ASTNode *parse_with_context(ParseContext* ctx, Token *tokens);
 ASTNode *parse(Token *tokens);
+ASTNode *parse_ex(const char* input, Token *tokens);
+ParseContext* parse_get_context(void);
 IRNode *ast_to_ir(ASTNode *ast);
 void exec_ir(IRNode *ir);
 void free_tokens(Token *tokens);

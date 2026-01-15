@@ -1,13 +1,21 @@
+#include <ctype.h>
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <math.h>
 
 #include "db.h"
 #include "logger.h"
-#include "values.h"
 #include "table.h"
+#include "values.h"
+
+static void print_centered(const char* str, int width) {
+    int len = strlen(str);
+    int padding = width - len;
+    int left_pad = padding / 2;
+
+    printf("%*s%s%*s", left_pad, "", str, width - left_pad - len, "");
+}
 
 static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name);
 static bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema);
@@ -16,12 +24,47 @@ static void exec_update_row(const IRNode* current);
 static void exec_delete_row(const IRNode* current);
 static void exec_aggregate(const IRNode* current);
 static void exec_project(const IRNode* current);
+static void exec_sort(const IRNode* current);
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema);
 static void print_project_header(const IRNode* current, const TableDef* schema);
 static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema);
 static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
 static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema);
 static Value eval_string_function(const Expr* expr, const Row* row, const TableDef* schema);
+static const char* scalar_func_name(ScalarFuncType func_type) {
+    switch (func_type) {
+        case FUNC_ABS:
+            return "ABS";
+        case FUNC_SQRT:
+            return "SQRT";
+        case FUNC_MOD:
+            return "MOD";
+        case FUNC_POW:
+            return "POWER";
+        case FUNC_ROUND:
+            return "ROUND";
+        case FUNC_FLOOR:
+            return "FLOOR";
+        case FUNC_CEIL:
+            return "CEIL";
+        case FUNC_UPPER:
+            return "UPPER";
+        case FUNC_LOWER:
+            return "LOWER";
+        case FUNC_LEN:
+            return "LENGTH";
+        case FUNC_MID:
+            return "MID";
+        case FUNC_LEFT:
+            return "LEFT";
+        case FUNC_RIGHT:
+            return "RIGHT";
+        case FUNC_CONCAT:
+            return "CONCAT";
+        default:
+            return "UNKNOWN";
+    }
+}
 
 static bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
     if (!expr) return true;
@@ -85,41 +128,39 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
     }
 }
 
-
-
+/* Apply WHERE filter */
 static void exec_filter(const IRNode* current) {
     log_msg(LOG_DEBUG, "exec_filter: Filtering table: %s", current->filter.table_name);
 
     Table* table = get_table(current->filter.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_filter: Table '%s' does not exist", current->filter.table_name);
-        log_msg(LOG_ERROR, "exec_filter: Cannot filter table '%s': table does not exist",
-                current->filter.table_name);
+        char suggestion[256];
+        const char* table_names[MAX_TABLES];
+        extern Table tables[];
+        extern int table_count;
+        for (int i = 0; i < table_count; i++) {
+            table_names[i] = tables[i].name;
+        }
+        suggest_similar(current->filter.table_name, table_names, table_count, suggestion,
+                        sizeof(suggestion));
+        show_prominent_error("Table '%s' does not exist", current->filter.table_name);
+        if (strlen(suggestion) > 0) {
+            printf("  %s\n", suggestion);
+        }
         return;
     }
 
     log_msg(LOG_INFO, "exec_filter: Displaying filtered table '%s'", table->name);
 
-    print_table_header(&table->schema);
-
+    int filtered_count = 0;
     for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
         Row* row = &table->rows[row_idx];
         if (eval_expression(current->filter.filter_expr, row, &table->schema)) {
-            print_row_data(row, &table->schema);
+            filtered_count++;
         }
     }
-    
-    // Bottom border
-    printf("└");
-    for (int i = 0; i < table->schema.column_count; i++) {
-        for (int j = 0; j < 20; j++) {
-            printf("─");
-        }
-        if (i < table->schema.column_count - 1) {
-            printf("┴");
-        }
-    }
-    printf("┘\n");
+
+    log_msg(LOG_INFO, "exec_filter: Found %d matching rows", filtered_count);
 }
 
 static void exec_update_row(const IRNode* current) {
@@ -128,10 +169,19 @@ static void exec_update_row(const IRNode* current) {
 
     Table* table = get_table(current->update_row.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_update_row: Table '%s' does not exist",
-                current->update_row.table_name);
-        log_msg(LOG_ERROR, "exec_update_row: Cannot update table '%s': table does not exist",
-                current->update_row.table_name);
+        char suggestion[256];
+        const char* table_names[MAX_TABLES];
+        extern Table tables[];
+        extern int table_count;
+        for (int i = 0; i < table_count; i++) {
+            table_names[i] = tables[i].name;
+        }
+        suggest_similar(current->update_row.table_name, table_names, table_count, suggestion,
+                        sizeof(suggestion));
+        show_prominent_error("Table '%s' does not exist", current->update_row.table_name);
+        if (strlen(suggestion) > 0) {
+            printf("  %s\n", suggestion);
+        }
         return;
     }
 
@@ -169,8 +219,19 @@ static void exec_aggregate(const IRNode* current) {
 
     Table* table = get_table(current->aggregate.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_aggregate: Table '%s' does not exist",
-                current->aggregate.table_name);
+        char suggestion[256];
+        const char* table_names[MAX_TABLES];
+        extern Table tables[];
+        extern int table_count;
+        for (int i = 0; i < table_count; i++) {
+            table_names[i] = tables[i].name;
+        }
+        suggest_similar(current->aggregate.table_name, table_names, table_count, suggestion,
+                        sizeof(suggestion));
+        show_prominent_error("Table '%s' does not exist", current->aggregate.table_name);
+        if (strlen(suggestion) > 0) {
+            printf("  %s\n", suggestion);
+        }
         return;
     }
 
@@ -194,8 +255,8 @@ static void exec_aggregate(const IRNode* current) {
         for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
             Value val = VAL_NULL;
             if (current->aggregate.operand->type == EXPR_COLUMN) {
-                val = get_column_value(&table->rows[row_idx], &table->schema, 
-                                      current->aggregate.operand->column_name);
+                val = get_column_value(&table->rows[row_idx], &table->schema,
+                                       current->aggregate.operand->column_name);
             } else if (current->aggregate.operand->type == EXPR_VALUE) {
                 val = current->aggregate.operand->value;
             } else {
@@ -221,9 +282,11 @@ static void exec_aggregate(const IRNode* current) {
     } else if (result.type == TYPE_FLOAT) {
         printf("%-20.2f\n", result.float_val);
     } else if (result.type == TYPE_STRING) {
-        printf("%-20s\n", result.char_val);
+        print_centered(result.char_val, 20);
+        printf("\n");
     } else {
-        printf("%-20s\n", "NULL");
+        print_centered("NULL", 20);
+        printf("\n");
     }
     if (current->aggregate.distinct) {
         for (int i = 0; i < MAX_ROWS; i++) {
@@ -240,25 +303,27 @@ static void exec_project(const IRNode* current) {
 
     Table* table = get_table(current->project.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_project: Table '%s' does not exist", current->project.table_name);
         return;
+    }
+
+    int display_limit = table->row_count;
+    if (current->project.limit > 0 && current->project.limit < display_limit) {
+        display_limit = current->project.limit;
     }
 
     print_project_header(current, &table->schema);
 
-    for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
+    for (int row_idx = 0; row_idx < display_limit; row_idx++) {
         print_project_row(current, &table->rows[row_idx], &table->schema);
     }
-    
-    // Bottom border
+
     int column_count = current->project.expression_count;
-    
-    // Handle * expansion
+
     if (column_count == 1 && current->project.expressions[0]->type == EXPR_VALUE &&
         strcmp(current->project.expressions[0]->value.char_val, "*") == 0) {
         column_count = table->schema.column_count;
     }
-    
+
     printf("└");
     for (int i = 0; i < column_count; i++) {
         for (int j = 0; j < 20; j++) {
@@ -270,8 +335,6 @@ static void exec_project(const IRNode* current) {
     }
     printf("┘\n");
 }
-
-
 
 static Value create_int(int val) {
     Value result;
@@ -314,20 +377,14 @@ static Value get_column_value(const Row* row, const TableDef* schema, const char
     return VAL_NULL;
 }
 
-
-
-
-
 static void print_project_header(const IRNode* current, const TableDef* schema) {
     int column_count = current->project.expression_count;
-    
-    // Handle * expansion
+
     if (column_count == 1 && current->project.expressions[0]->type == EXPR_VALUE &&
         strcmp(current->project.expressions[0]->value.char_val, "*") == 0) {
         column_count = schema->column_count;
     }
-    
-    // Top border
+
     printf("┌");
     for (int i = 0; i < column_count; i++) {
         for (int j = 0; j < 20; j++) {
@@ -338,28 +395,29 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
         }
     }
     printf("┐\n");
-    
-    // Header row
+
     printf("│");
     for (int i = 0; i < current->project.expression_count; i++) {
         if (current->project.expressions[i]->type == EXPR_COLUMN) {
-            printf("%-20s", current->project.expressions[i]->column_name);
+            print_centered(current->project.expressions[i]->column_name, 20);
         } else if (current->project.expressions[i]->type == EXPR_AGGREGATE_FUNC) {
-            printf("%-20s", 
-                current->project.expressions[i]->aggregate.func_type == FUNC_COUNT ? "COUNT" :
-                current->project.expressions[i]->aggregate.func_type == FUNC_SUM ? "SUM" :
-                current->project.expressions[i]->aggregate.func_type == FUNC_AVG ? "AVG" :
-                current->project.expressions[i]->aggregate.func_type == FUNC_MIN ? "MIN" :
-                current->project.expressions[i]->aggregate.func_type == FUNC_MAX ? "MAX" : "UNKNOWN");
+            print_centered(
+                current->project.expressions[i]->aggregate.func_type == FUNC_COUNT ? "COUNT"
+                : current->project.expressions[i]->aggregate.func_type == FUNC_SUM ? "SUM"
+                : current->project.expressions[i]->aggregate.func_type == FUNC_AVG ? "AVG"
+                : current->project.expressions[i]->aggregate.func_type == FUNC_MIN ? "MIN"
+                : current->project.expressions[i]->aggregate.func_type == FUNC_MAX ? "MAX"
+                                                                                   : "UNKNOWN",
+                20);
         } else if (current->project.expressions[i]->type == EXPR_VALUE &&
                    strcmp(current->project.expressions[i]->value.char_val, "*") == 0) {
             for (int j = 0; j < schema->column_count; j++) {
-                printf("%-20s", schema->columns[j].name);
+                print_centered(schema->columns[j].name, 20);
                 printf("│");
             }
             break;
         } else {
-            printf("%-20s", "expression");
+            print_centered("expression", 20);
         }
         if (!(current->project.expressions[i]->type == EXPR_VALUE &&
               strcmp(current->project.expressions[i]->value.char_val, "*") == 0 && i == 0)) {
@@ -367,8 +425,7 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
         }
     }
     printf("\n");
-    
-    // Header separator
+
     printf("├");
     for (int i = 0; i < column_count; i++) {
         for (int j = 0; j < 20; j++) {
@@ -381,8 +438,6 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
     printf("┤\n");
 }
 
-
-
 static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema) {
     printf("│");
     for (int col_idx = 0; col_idx < current->project.expression_count; col_idx++) {
@@ -390,33 +445,90 @@ static void print_project_row(const IRNode* current, const Row* row, const Table
             strcmp(current->project.expressions[col_idx]->value.char_val, "*") == 0) {
             for (int j = 0; j < schema->column_count; j++) {
                 if (row->is_null[j]) {
-                    printf("%-20s", "NULL");
+                    print_centered("NULL", 20);
                 } else {
-                    printf("%-20s", repr(&row->values[j]));
+                    print_centered(repr(&row->values[j]), 20);
                 }
                 printf("│");
             }
             break;
         } else if (current->project.expressions[col_idx]->type == EXPR_AGGREGATE_FUNC) {
-            // Skip aggregate functions in project - they were already handled by exec_aggregate
-            printf("%-20s", "");
+            // Skip aggregate functions
+            print_centered("", 20);
         } else {
             Value val = eval_select_expression(current->project.expressions[col_idx], row, schema);
             if (is_null(&val)) {
-                printf("%-20s", "NULL");
+                print_centered("NULL", 20);
             } else {
-                printf("%-20s", repr(&val));
+                print_centered(repr(&val), 20);
             }
         }
         if (!(current->project.expressions[col_idx]->type == EXPR_VALUE &&
-              strcmp(current->project.expressions[col_idx]->value.char_val, "*") == 0 && col_idx == 0)) {
+              strcmp(current->project.expressions[col_idx]->value.char_val, "*") == 0 &&
+              col_idx == 0)) {
             printf("│");
         }
     }
     printf("\n");
 }
 
+/* Returns <0 if a<b, 0 if equal, >0 if a>b */
+static int compare_rows_for_sort(const Row* a, const Row* b, const TableDef* schema,
+                                 Expr* const* order_by, int order_by_count) {
+    for (int i = 0; i < order_by_count; i++) {
+        if (order_by[i]->type == EXPR_COLUMN) {
+            const char* col_name = order_by[i]->column_name;
+            Value val_a = get_column_value(a, schema, col_name);
+            Value val_b = get_column_value(b, schema, col_name);
 
+            int cmp = 0;
+            if (val_a.type == TYPE_INT && val_b.type == TYPE_INT) {
+                cmp = val_a.int_val - val_b.int_val;
+            } else if (val_a.type == TYPE_FLOAT || val_b.type == TYPE_FLOAT) {
+                cmp = (int)(value_to_double(&val_a) - value_to_double(&val_b));
+            } else {
+                cmp = strcmp(val_a.char_val, val_b.char_val);
+            }
+
+            if (cmp != 0) {
+                return cmp;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Bubble sort ORDER BY columns (asc/desc) */
+static void exec_sort(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_sort: Sorting table: %s by %d columns", current->sort.table_name,
+            current->sort.order_by_count);
+
+    Table* table = get_table(current->sort.table_name);
+    if (!table) {
+        return;
+    }
+
+    for (int i = 0; i < table->row_count - 1; i++) {
+        for (int j = 0; j < table->row_count - i - 1; j++) {
+            int cmp = compare_rows_for_sort(&table->rows[j], &table->rows[j + 1], &table->schema,
+                                            current->sort.order_by, current->sort.order_by_count);
+            bool swap_needed = false;
+            if (cmp != 0) {
+                if (current->sort.order_by_desc[0]) {
+                    swap_needed = cmp < 0;
+                } else {
+                    swap_needed = cmp > 0;
+                }
+            }
+            if (swap_needed) {
+                Row temp;
+                copy_row(&temp, &table->rows[j], table->schema.column_count);
+                copy_row(&table->rows[j], &table->rows[j + 1], table->schema.column_count);
+                copy_row(&table->rows[j + 1], &temp, table->schema.column_count);
+            }
+        }
+    }
+}
 
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
     if (!expr) return VAL_NULL;
@@ -425,6 +537,61 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
             return get_column_value(row, schema, expr->column_name);
         case EXPR_VALUE:
             return expr->value;
+        case EXPR_BINARY_OP: {
+            Value left_val = eval_select_expression(expr->binary.left, row, schema);
+            Value right_val = eval_select_expression(expr->binary.right, row, schema);
+
+            if (is_null(&left_val) || is_null(&right_val)) return VAL_NULL;
+            if (left_val.type == TYPE_ERROR || right_val.type == TYPE_ERROR) return VAL_ERROR;
+
+            switch (expr->binary.op) {
+                case OP_ADD: {
+                    if (left_val.type == TYPE_FLOAT || right_val.type == TYPE_FLOAT) {
+                        return create_float(value_to_double(&left_val) +
+                                            value_to_double(&right_val));
+                    } else {
+                        return create_int(value_to_double(&left_val) + value_to_double(&right_val));
+                    }
+                    break;
+                }
+                case OP_SUBTRACT: {
+                    if (left_val.type == TYPE_FLOAT || right_val.type == TYPE_FLOAT) {
+                        return create_float(value_to_double(&left_val) -
+                                            value_to_double(&right_val));
+                    } else {
+                        return create_int(value_to_double(&left_val) - value_to_double(&right_val));
+                    }
+                    break;
+                }
+                case OP_MULTIPLY: {
+                    if (left_val.type == TYPE_FLOAT || right_val.type == TYPE_FLOAT) {
+                        return create_float(value_to_double(&left_val) *
+                                            value_to_double(&right_val));
+                    } else {
+                        return create_int(value_to_double(&left_val) * value_to_double(&right_val));
+                    }
+                    break;
+                }
+                case OP_DIVIDE: {
+                    double right_d = value_to_double(&right_val);
+                    if (right_d == 0.0) return VAL_ERROR;
+                    if (left_val.type == TYPE_FLOAT || right_val.type == TYPE_FLOAT) {
+                        return create_float(value_to_double(&left_val) / right_d);
+                    } else {
+                        return create_int(value_to_double(&left_val) / right_d);
+                    }
+                    break;
+                }
+                case OP_MODULUS: {
+                    int right_i = (int)value_to_double(&right_val);
+                    if (right_i == 0) return VAL_ERROR;
+                    return create_int((int)value_to_double(&left_val) % right_i);
+                    break;
+                }
+                default:
+                    return VAL_ERROR;
+            }
+        }
         case EXPR_AGGREGATE_FUNC:
             log_msg(LOG_ERROR,
                     "eval_select_expression: Aggregate function in expression evaluation");
@@ -459,9 +626,8 @@ static Value eval_math_function(const Expr* expr, const Row* row, const TableDef
         if (is_null(&arg)) return VAL_NULL;
         if (arg.type != TYPE_INT && arg.type != TYPE_FLOAT) {
             log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function found non-numeric value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&arg), arg.type);
+                    "eval_scalar_function: %s function found non-numeric value of type %d",
+                    scalar_func_name(expr->scalar.func_type), arg.type);
             return VAL_ERROR;
         }
 
@@ -515,9 +681,8 @@ static Value eval_math_function(const Expr* expr, const Row* row, const TableDef
         if (is_null(&arg)) return VAL_NULL;
         if (arg.type != TYPE_INT && arg.type != TYPE_FLOAT) {
             log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function found non-numeric value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&arg), arg.type);
+                    "eval_scalar_function: %s function found non-numeric value of type %d",
+                    scalar_func_name(expr->scalar.func_type), arg.type);
             return VAL_ERROR;
         }
 
@@ -529,9 +694,8 @@ static Value eval_math_function(const Expr* expr, const Row* row, const TableDef
             if (is_null(&dec_arg)) return VAL_NULL;
             if (dec_arg.type != TYPE_INT) {
                 log_msg(LOG_ERROR,
-                        "eval_scalar_function: %s function found non-integer value '%s' of "
-                        "type '%s'",
-                        expr->scalar.func_type, repr(&arg), arg.type);
+                        "eval_scalar_function: %s function found non-numeric value of type %d",
+                        scalar_func_name(expr->scalar.func_type), arg.type);
                 return VAL_ERROR;
             }
             decimals = dec_arg.int_val;
@@ -553,9 +717,8 @@ static Value eval_math_function(const Expr* expr, const Row* row, const TableDef
         if (is_null(&arg)) return VAL_NULL;
         if (arg.type != TYPE_INT && arg.type != TYPE_FLOAT) {
             log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function found non-numeric value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&arg), arg.type);
+                    "eval_scalar_function: %s function found non-numeric value of type %d",
+                    scalar_func_name(expr->scalar.func_type), arg.type);
             return VAL_ERROR;
         }
 
@@ -588,8 +751,8 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
         if (is_null(&arg)) return VAL_NULL;
         if (arg.type != TYPE_STRING) {
             log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function found non-string value '%s' of type '%s'",
-                    expr->scalar.func_type, repr(&arg), arg.type);
+                    "eval_scalar_function: %s function found non-string value of type %d",
+                    scalar_func_name(expr->scalar.func_type), arg.type);
             return VAL_ERROR;
         }
 
@@ -605,8 +768,8 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
         if (is_null(&arg)) return VAL_NULL;
         if (arg.type != TYPE_STRING) {
             log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function found non-string value '%s' of type '%s'",
-                    expr->scalar.func_type, repr(&arg), arg.type);
+                    "eval_scalar_function: %s function found non-string value of type %d",
+                    scalar_func_name(expr->scalar.func_type), arg.type);
             return VAL_ERROR;
         }
 
@@ -622,8 +785,8 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
         if (is_null(&arg)) return VAL_NULL;
         if (arg.type != TYPE_STRING) {
             log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function found non-string value '%s' of type '%s'",
-                    expr->scalar.func_type, repr(&arg), arg.type);
+                    "eval_scalar_function: %s function found non-string value of type %d",
+                    scalar_func_name(expr->scalar.func_type), arg.type);
             return VAL_ERROR;
         }
 
@@ -636,18 +799,18 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
 
         if (is_null(&str_arg) || is_null(&start_arg)) return VAL_NULL;
         if (str_arg.type != TYPE_STRING) {
-            log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function string input found non-string value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&str_arg), str_arg.type);
+            log_msg(
+                LOG_ERROR,
+                "eval_scalar_function: %s function string input found non-string value of type %d",
+                scalar_func_name(expr->scalar.func_type), str_arg.type);
             return VAL_ERROR;
         }
 
         if (start_arg.type != TYPE_INT) {
-            log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function index input found non-integer value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&start_arg), start_arg.type);
+            log_msg(
+                LOG_ERROR,
+                "eval_scalar_function: %s function index input found non-integer value of type %d",
+                scalar_func_name(expr->scalar.func_type), start_arg.type);
             return VAL_ERROR;
         }
 
@@ -681,18 +844,18 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
 
         if (is_null(&str_arg) || is_null(&len_arg)) return VAL_NULL;
         if (str_arg.type != TYPE_STRING) {
-            log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function string input found non-string value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&str_arg), str_arg.type);
+            log_msg(
+                LOG_ERROR,
+                "eval_scalar_function: %s function string input found non-string value of type %d",
+                scalar_func_name(expr->scalar.func_type), str_arg.type);
             return VAL_ERROR;
         }
 
         if (len_arg.type != TYPE_INT) {
-            log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function index input found non-integer value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&len_arg), len_arg.type);
+            log_msg(
+                LOG_ERROR,
+                "eval_scalar_function: %s function index input found non-integer value of type %d",
+                scalar_func_name(expr->scalar.func_type), len_arg.type);
             return VAL_ERROR;
         }
 
@@ -712,18 +875,18 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
 
         if (is_null(&str_arg) || is_null(&len_arg)) return VAL_NULL;
         if (str_arg.type != TYPE_STRING) {
-            log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function string input found non-string value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&str_arg), str_arg.type);
+            log_msg(
+                LOG_ERROR,
+                "eval_scalar_function: %s function string input found non-string value of type %d",
+                scalar_func_name(expr->scalar.func_type), str_arg.type);
             return VAL_ERROR;
         }
 
         if (len_arg.type != TYPE_INT) {
-            log_msg(LOG_ERROR,
-                    "eval_scalar_function: %s function index input found non-integer value '%s' of "
-                    "type '%s'",
-                    expr->scalar.func_type, repr(&len_arg), len_arg.type);
+            log_msg(
+                LOG_ERROR,
+                "eval_scalar_function: %s function index input found non-integer value of type %d",
+                scalar_func_name(expr->scalar.func_type), len_arg.type);
             return VAL_ERROR;
         }
 
@@ -769,7 +932,7 @@ static Value eval_scalar_function(const Expr* expr, const Row* row, const TableD
         return result;
     }
 
-    log_msg(LOG_ERROR, "eval_scalar_function: Unknown scalar function '%s'",
+    log_msg(LOG_ERROR, "eval_scalar_function: Unknown scalar function with type %d",
             expr->scalar.func_type);
     return VAL_ERROR;
 }
@@ -780,10 +943,19 @@ static void exec_delete_row(const IRNode* current) {
 
     Table* table = get_table(current->delete_row.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_delete_row: Table '%s' does not exist",
-                current->delete_row.table_name);
-        log_msg(LOG_ERROR, "exec_delete_row: Cannot delete from table '%s': table does not exist",
-                current->delete_row.table_name);
+        char suggestion[256];
+        const char* table_names[MAX_TABLES];
+        extern Table tables[];
+        extern int table_count;
+        for (int i = 0; i < table_count; i++) {
+            table_names[i] = tables[i].name;
+        }
+        suggest_similar(current->delete_row.table_name, table_names, table_count, suggestion,
+                        sizeof(suggestion));
+        show_prominent_error("Table '%s' does not exist", current->delete_row.table_name);
+        if (strlen(suggestion) > 0) {
+            printf("  %s\n", suggestion);
+        }
         return;
     }
 
@@ -820,7 +992,6 @@ void exec_ir(IRNode* ir) {
 
     IRNode* current = ir;
     while (current) {
-
         switch (current->type) {
             case IR_CREATE_TABLE:
                 exec_create_table(current);
@@ -856,6 +1027,10 @@ void exec_ir(IRNode* ir) {
 
             case IR_PROJECT:
                 exec_project(current);
+                break;
+
+            case IR_SORT:
+                exec_sort(current);
                 break;
 
             default:

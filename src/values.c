@@ -59,6 +59,7 @@ const char* repr(const Value* val) {
     return buffer;
 }
 
+/* returns -1/0/1 for ordering */
 static int compare_values(const Value* left, const Value* right) {
     if (is_null(left) || is_null(right)) return 0;
 
@@ -90,6 +91,7 @@ static int compare_values(const Value* left, const Value* right) {
     return 0;
 }
 
+/* LIKE pattern matching */
 static bool eval_like_expression(const Value* left, const Value* right) {
     if (right->type != TYPE_STRING) {
         log_msg(LOG_ERROR, "Right hand side of LIKE expression (expected: %s, got: %s)",
