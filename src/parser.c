@@ -1,7 +1,7 @@
 #include <stdio.h>
-#include <strings.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 
 #include "db.h"
 #include "logger.h"
@@ -162,29 +162,34 @@ static ASTNode* parse_create_table(void) {
 
 static Value parse_value(void) {
     Value val;
-    val.type = TYPE_STRING;
-    strcpy(val.value, "NULL");
 
     if (match(TOKEN_STRING)) {
         val.type = TYPE_STRING;
-        strcpy(val.value, current_token->value);
-        val.value[MAX_STRING_LEN - 1] = '\0';
+        val.char_val = malloc(strlen(current_token->value) + 1);
+        strcpy(val.char_val, current_token->value);
+
         advance();
+        return val;
     } else if (match(TOKEN_NUMBER)) {
         if (strchr(current_token->value, '.')) {
             val.type = TYPE_FLOAT;
+            val.float_val = atof(current_token->value);
         } else {
             val.type = TYPE_INT;
+            val.int_val = atoi(current_token->value);
         }
-        strcpy(val.value, current_token->value);
-        val.value[MAX_STRING_LEN - 1] = '\0';
         advance();
+        return val;
     } else if (match(TOKEN_KEYWORD) && strcmp(current_token->value, "NULL") == 0) {
-        val.type = TYPE_STRING;
-        strcpy(val.value, "NULL");
+        val.type = TYPE_NULL;
         advance();
+        return val;
     }
 
+    // Default case
+    val.type = TYPE_STRING;
+    val.char_val = malloc(1);
+    strcpy(val.char_val, "");
     return val;
 }
 
@@ -194,8 +199,19 @@ static Expr* parse_aggregate_func(void) {
 
     expr->type = EXPR_AGGREGATE_FUNC;
 
-    strncpy(expr->aggregate.func_name, current_token->value, 15);
-    expr->aggregate.func_name[15] = '\0';
+    if (strcmp(current_token->value, "COUNT") == 0) {
+        expr->aggregate.func_type = FUNC_COUNT;
+    } else if (strcmp(current_token->value, "SUM") == 0) {
+        expr->aggregate.func_type = FUNC_SUM;
+    } else if (strcmp(current_token->value, "AVG") == 0) {
+        expr->aggregate.func_type = FUNC_AVG;
+    } else if (strcmp(current_token->value, "MIN") == 0) {
+        expr->aggregate.func_type = FUNC_MIN;
+    } else if (strcmp(current_token->value, "MAX") == 0) {
+        expr->aggregate.func_type = FUNC_MAX;
+    } else {
+        expr->aggregate.func_type = FUNC_COUNT;  
+    }
     advance();
 
     if (!expect(TOKEN_LPAREN)) {
@@ -203,11 +219,11 @@ static Expr* parse_aggregate_func(void) {
         return NULL;
     }
 
-    if (strcmp(expr->aggregate.func_name, "COUNT") == 0 && match(TOKEN_OPERATOR) &&
+    if (expr->aggregate.func_type == FUNC_COUNT && match(TOKEN_OPERATOR) &&
         strcmp(current_token->value, "*") == 0) {
         expr->aggregate.count_all = true;
         expr->aggregate.distinct = false;
-        expr->aggregate.operand = NULL;  
+        expr->aggregate.operand = NULL;
         advance();
     } else {
         if (match(TOKEN_DISTINCT)) {
@@ -248,21 +264,20 @@ static Expr* parse_primary(void) {
     } else if (match(TOKEN_STRING) || match(TOKEN_NUMBER)) {
         expr->type = EXPR_VALUE;
         if (match(TOKEN_STRING)) {
-            expr->value.type = TYPE_STRING;
+            expr->value.char_val = malloc(strlen(current_token->value) + 1);
+            strcpy(expr->value.char_val, current_token->value);
         } else {
             if (strchr(current_token->value, '.')) {
-                expr->value.type = TYPE_FLOAT;
+                expr->value.float_val = atof(current_token->value);
             } else {
-                expr->value.type = TYPE_INT;
+                expr->value.int_val = atoi(current_token->value);
             }
         }
-        strncpy(expr->value.value, current_token->value, MAX_STRING_LEN - 1);
-        expr->value.value[MAX_STRING_LEN - 1] = '\0';
         advance();
     } else if (match(TOKEN_KEYWORD) && strcmp(current_token->value, "NULL") == 0) {
         expr->type = EXPR_VALUE;
-        expr->value.type = TYPE_STRING;
-        strcpy(expr->value.value, "NULL");
+        expr->value.char_val = malloc(5);
+        strcpy(expr->value.char_val, "NULL");
         advance();
     } else if (match(TOKEN_AGGREGATE_FUNC)) {
         free(expr);
@@ -418,8 +433,8 @@ static ASTNode* parse_select(void) {
         Expr* star_expr = malloc(sizeof(Expr));
         if (star_expr) {
             star_expr->type = EXPR_VALUE;
-            strcpy(star_expr->value.value, "*");
-            star_expr->value.type = TYPE_STRING;
+            star_expr->value.char_val = malloc(2);
+            strcpy(star_expr->value.char_val, "*");
         }
         node->select.expressions[expr_count] = star_expr;
         advance();

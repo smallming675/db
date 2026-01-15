@@ -1,9 +1,25 @@
+#include <ctype.h>
 #include <limits.h>
 #include <math.h>
-#include <ctype.h>
 
 #include "db.h"
 #include "logger.h"
+
+const Value VAL_NULL = {.type = TYPE_NULL};
+const Value VAL_ERROR = {.type = TYPE_ERROR};
+
+static Value create_float(float val) {
+    Value result;
+    result.type = TYPE_FLOAT;
+    result.float_val = val;
+    return result;
+}
+static Value create_int(int val) {
+    Value result;
+    result.type = TYPE_INT;
+    result.int_val = val;
+    return result;
+}
 
 Table tables[MAX_TABLES];
 int table_count = 0;
@@ -12,7 +28,6 @@ static Table* find_table(const char* name);
 static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name);
 static bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema);
 static bool eval_comparison(Value left, Value right, OperatorType op);
-static bool string_to_bool(const char* str);
 static int compare_values(const Value* left, const Value* right);
 static void exec_filter(const IRNode* current);
 static void exec_update_row(const IRNode* current);
@@ -20,9 +35,9 @@ static void exec_delete_row(const IRNode* current);
 static void exec_aggregate(const IRNode* current);
 static void exec_project(const IRNode* current);
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema);
-static Value compute_aggregate(const char* func_name, AggregateState* state, DataType return_type);
-static void update_aggregate_state(AggregateState* state, Value val, const IRAggregate* agg);
-static bool is_null(Value val);
+static Value compute_aggregate(AggFuncType func_type, AggState* state, DataType return_type);
+static void update_aggregate_state(AggState* state, const Value* val, const IRAggregate* agg);
+static bool is_null(const Value* val);
 static void print_table_header(const TableDef* schema);
 static void print_table_separator(int column_count);
 static void print_row_data(const Row* row, const TableDef* schema);
@@ -30,6 +45,10 @@ static void print_project_header(const IRNode* current, const TableDef* schema);
 static void print_project_separator(const IRNode* current, const TableDef* schema);
 static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema);
 static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
+static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema);
+static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema);
+static Value eval_string_function(const Expr* expr, const Row* row, const TableDef* schema);
+static const char* repr(const Value* val);
 
 static Table* find_table(const char* name) {
     for (int i = 0; i < table_count; i++) {
@@ -41,55 +60,61 @@ static Table* find_table(const char* name) {
 }
 
 static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name) {
-    Value val;
-    val.type = TYPE_STRING;
-    strcpy(val.value, "NULL");
-
     for (int i = 0; i < schema->column_count; i++) {
         if (strcmp(schema->columns[i].name, column_name) == 0) {
             if (row->is_null[i]) {
-                strcpy(val.value, "NULL");
-                val.type = TYPE_STRING;
+                return VAL_NULL;
             } else {
-                val = row->values[i];
+                return row->values[i];
             }
             break;
         }
     }
-    return val;
+    return VAL_NULL;
 }
 
 static int compare_values(const Value* left, const Value* right) {
-    if (strcmp(left->value, "NULL") == 0 || strcmp(right->value, "NULL") == 0) {
-        return 0;
-    }
+    if (is_null(left) || is_null(right)) return 0;
 
     if (left->type == TYPE_INT && right->type == TYPE_INT) {
-        int left_val = atoi(left->value);
-        int right_val = atoi(right->value);
-        return left_val - right_val;
+        return left->int_val - right->int_val;
     } else if (left->type == TYPE_FLOAT && right->type == TYPE_FLOAT) {
-        float left_val = atof(left->value);
-        float right_val = atof(right->value);
+        float left_val = left->float_val;
+        float right_val = right->float_val;
         if (left_val < right_val) return -1;
         if (left_val > right_val) return 1;
         return 0;
-    } else if ((left->type == TYPE_INT && right->type == TYPE_FLOAT) ||
-               (left->type == TYPE_FLOAT && right->type == TYPE_INT)) {
-        float left_val = atof(left->value);
-        float right_val = atof(right->value);
+    } else if (left->type == TYPE_INT && right->type == TYPE_FLOAT) {
+        int left_val = left->int_val;
+        float right_val = right->float_val;
         if (left_val < right_val) return -1;
         if (left_val > right_val) return 1;
         return 0;
-    } else {
-        return strcmp(left->value, right->value);
+    } else if (left->type == TYPE_FLOAT && right->type == TYPE_INT) {
+        float left_val = left->float_val;
+        int right_val = right->int_val;
+        if (left_val < right_val) return -1;
+        if (left_val > right_val) return 1;
+        return 0;
     }
+
+    if (left->type == TYPE_STRING && right->type == TYPE_STRING) {
+        return strcmp(left->char_val, right->char_val);
+    }
+    return 0;
 }
 
-static bool eval_like_expression(Value left, Value right) {
-    const char* text = left.value;
-    const char* pattern = right.value;
-    if (strcmp(text, "NULL") == 0 || strcmp(pattern, "NULL") == 0) return false;
+static bool eval_like_expression(const Value* left, const Value* right) {
+    if (right->type != TYPE_STRING) {
+        log_msg(LOG_ERROR, "Right hand side of LIKE expression (expected: %s, got: %s)",
+                TYPE_STRING, right->type);
+        return false;
+    }
+
+    if (is_null(left) || is_null(right)) return false;
+
+    const char* text = repr(left);
+    const char* pattern = right->char_val;
     const char* p = pattern;
     bool match = true;
 
@@ -144,7 +169,7 @@ static bool eval_comparison(Value left, Value right, OperatorType op) {
         case OP_GREATER_EQUAL:
             return cmp >= 0;
         case OP_LIKE:
-            return eval_like_expression(left, right);
+            return eval_like_expression(&left, &right);
         default:
             return false;
     }
@@ -156,10 +181,10 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
     switch (expr->type) {
         case EXPR_COLUMN: {
             Value val = get_column_value(row, schema, expr->column_name);
-            return string_to_bool(val.value);
+            return !is_null(&val);
         }
         case EXPR_VALUE: {
-            return string_to_bool(expr->value.value);
+            return !is_null(&expr->value);
         }
         case EXPR_BINARY_OP: {
             bool left_val = eval_expression(expr->binary.left, row, schema);
@@ -180,14 +205,12 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
                         expr->binary.right->type == EXPR_VALUE) {
                         Value col_val =
                             get_column_value(row, schema, expr->binary.left->column_name);
-                        return eval_comparison(col_val, expr->binary.right->value,
-                                                   expr->binary.op);
+                        return eval_comparison(col_val, expr->binary.right->value, expr->binary.op);
                     } else if (expr->binary.left->type == EXPR_VALUE &&
                                expr->binary.right->type == EXPR_COLUMN) {
                         Value col_val =
                             get_column_value(row, schema, expr->binary.right->column_name);
-                        return eval_comparison(expr->binary.left->value, col_val,
-                                                   expr->binary.op);
+                        return eval_comparison(expr->binary.left->value, col_val, expr->binary.op);
                     } else if (expr->binary.left->type == EXPR_COLUMN &&
                                expr->binary.right->type == EXPR_COLUMN) {
                         Value left_val =
@@ -212,14 +235,6 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
         default:
             return false;
     }
-}
-
-static bool string_to_bool(const char* str) {
-    if (strcmp(str, "NULL") == 0) return false;
-    if (strcmp(str, "0") == 0) return false;
-    if (strcmp(str, "false") == 0) return false;
-    if (strcmp(str, "") == 0) return false;
-    return true;
 }
 
 static void exec_create_table(const IRNode* current) {
@@ -259,8 +274,7 @@ static void exec_insert_row(const IRNode* current) {
     if (!table) {
         log_msg(LOG_ERROR, "exec_insert_row: Table '%s' does not exist",
                 current->insert_row.table_name);
-        log_msg(LOG_ERROR,
-                "exec_insert_row: Cannot insert into table '%s': table does not exist",
+        log_msg(LOG_ERROR, "exec_insert_row: Cannot insert into table '%s': table does not exist",
                 current->insert_row.table_name);
         return;
     }
@@ -286,7 +300,7 @@ static void exec_insert_row(const IRNode* current) {
     Row* row = &table->rows[table->row_count];
     for (int i = 0; i < current->insert_row.value_count; i++) {
         row->values[i] = current->insert_row.values[i];
-        row->is_null[i] = (strcmp(current->insert_row.values[i].value, "NULL") == 0);
+        row->is_null[i] = is_null(&current->insert_row.values[i]);
     }
 
     log_msg(LOG_INFO, "exec_insert_row: Row inserted into table '%s' (row %d)",
@@ -389,8 +403,7 @@ static void exec_update_row(const IRNode* current) {
                     if (strcmp(table->schema.columns[col_idx].name,
                                current->update_row.values[i].column_name) == 0) {
                         row->values[col_idx] = current->update_row.values[i].value;
-                        row->is_null[col_idx] =
-                            (strcmp(current->update_row.values[i].value.value, "NULL") == 0);
+                        row->is_null[col_idx] = is_null(&current->update_row.values[i].value);
                         break;
                     }
                 }
@@ -404,7 +417,12 @@ static void exec_update_row(const IRNode* current) {
 
 static void exec_aggregate(const IRNode* current) {
     log_msg(LOG_DEBUG, "exec_aggregate: Computing aggregate: %s",
-            current->aggregate.aggregate_func);
+            current->aggregate.func_type == FUNC_SUM     ? "SUM"
+            : current->aggregate.func_type == FUNC_AVG   ? "AVG"
+            : current->aggregate.func_type == FUNC_COUNT ? "COUNT"
+            : current->aggregate.func_type == FUNC_MIN   ? "MIN"
+            : current->aggregate.func_type == FUNC_MAX   ? "MAX"
+                                                         : "UNKNOWN");
 
     Table* table = find_table(current->aggregate.table_name);
     if (!table) {
@@ -413,19 +431,36 @@ static void exec_aggregate(const IRNode* current) {
         return;
     }
 
-    AggregateState state = {0};
+    AggState state = {0};
     if (current->aggregate.distinct) {
         state.is_distinct = true;
     }
 
-    if (strcmp(current->aggregate.aggregate_func, "COUNT") == 0 && current->aggregate.count_all) {
+    if (current->aggregate.func_type == FUNC_COUNT && current->aggregate.count_all) {
+        log_msg(LOG_DEBUG, "exec_aggregate: COUNT(*) detected, using row_count");
         state.count = table->row_count;
     } else {
+        log_msg(LOG_DEBUG, "exec_aggregate: %s with operand, count_all=%d",
+                (current->aggregate.func_type == FUNC_COUNT ? "COUNT"
+                 : current->aggregate.func_type == FUNC_SUM ? "SUM"
+                 : current->aggregate.func_type == FUNC_AVG ? "AVG"
+                 : current->aggregate.func_type == FUNC_MIN ? "MIN"
+                 : current->aggregate.func_type == FUNC_MAX ? "MAX"
+                                                            : "UNKNOWN"),
+                current->aggregate.count_all);
         for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
-            Value val = eval_select_expression(current->aggregate.operand,
-                                                   &table->rows[row_idx], &table->schema);
-            update_aggregate_state(&state, val, &current->aggregate);
-            if (current->aggregate.distinct && !is_null(val)) {
+            Value val = VAL_NULL;
+            if (current->aggregate.operand->type == EXPR_COLUMN) {
+                val = get_column_value(&table->rows[row_idx], &table->schema, 
+                                      current->aggregate.operand->column_name);
+            } else if (current->aggregate.operand->type == EXPR_VALUE) {
+                val = current->aggregate.operand->value;
+            } else {
+                val = eval_select_expression(current->aggregate.operand, &table->rows[row_idx],
+                                             &table->schema);
+            }
+            update_aggregate_state(&state, &val, &current->aggregate);
+            if (current->aggregate.distinct && !is_null(&val)) {
                 for (int i = 0; i < state.distinct_count - 1; i++) {
                     if (state.seen_values[i]) {
                         free(state.seen_values[i]);
@@ -436,9 +471,17 @@ static void exec_aggregate(const IRNode* current) {
         }
     }
 
-    Value result = compute_aggregate(current->aggregate.aggregate_func, &state, TYPE_FLOAT);
+    Value result = compute_aggregate(current->aggregate.func_type, &state, TYPE_FLOAT);
 
-    printf("%-20s\n", result.value);
+    if (result.type == TYPE_INT) {
+        printf("%-20d\n", result.int_val);
+    } else if (result.type == TYPE_FLOAT) {
+        printf("%-20.6f\n", result.float_val);
+    } else if (result.type == TYPE_STRING) {
+        printf("%-20s\n", result.char_val);
+    } else {
+        printf("%-20s\n", "NULL");
+    }
     if (current->aggregate.distinct) {
         for (int i = 0; i < MAX_ROWS; i++) {
             if (state.seen_values[i]) {
@@ -454,23 +497,77 @@ static void exec_project(const IRNode* current) {
 
     Table* table = find_table(current->project.table_name);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_project: Table '%s' does not exist",
-                current->project.table_name);
+        log_msg(LOG_ERROR, "exec_project: Table '%s' does not exist", current->project.table_name);
         return;
     }
 
     print_project_header(current, &table->schema);
     print_project_separator(current, &table->schema);
 
-    int rows_processed = 0;
     for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
         print_project_row(current, &table->rows[row_idx], &table->schema);
-        rows_processed++;
     }
-
 }
 
-static bool is_null(Value val) { return strcmp(val.value, "NULL") == 0; }
+static bool is_null(const Value* val) {
+    if (!val) return true;
+    if (val->type == TYPE_ERROR) {
+        log_msg(LOG_ERROR, "Error value located, exiting...");
+        exit(1);
+    }
+    return val->type == TYPE_NULL;
+}
+
+static double value_to_double(const Value* arg) {
+    if (is_null(arg)) return 0.0;
+
+    switch (arg->type) {
+        case TYPE_INT:
+            return (double)arg->int_val;
+        case TYPE_FLOAT:
+            return arg->float_val;
+        default:
+            return 0.0;
+    }
+}
+
+static const char* repr(const Value* val) {
+    static char buffer[MAX_STRING_LEN];
+
+    if (!val || is_null(val)) {
+        strcpy(buffer, "NULL");
+        return buffer;
+    }
+
+    switch (val->type) {
+        case TYPE_INT:
+            snprintf(buffer, MAX_STRING_LEN, "%d", val->int_val);
+            break;
+        case TYPE_FLOAT:
+            snprintf(buffer, MAX_STRING_LEN, "%.6f", val->float_val);
+            break;
+        case TYPE_STRING:
+            strncpy(buffer, val->char_val, MAX_STRING_LEN - 1);
+            buffer[MAX_STRING_LEN - 1] = '\0';
+            break;
+        case TYPE_TIME:
+            snprintf(buffer, MAX_STRING_LEN, "%02d:%02d:%02d", val->time_val.hour,
+                     val->time_val.minute, val->time_val.second);
+            break;
+        case TYPE_DATE:
+            snprintf(buffer, MAX_STRING_LEN, "%04d-%02d-%02d", val->date_val.year,
+                     val->date_val.month, val->date_val.day);
+            break;
+        case TYPE_ERROR:
+            strcpy(buffer, "ERROR");
+            break;
+        default:
+            strcpy(buffer, "UNKNOWN");
+            break;
+    }
+
+    return buffer;
+}
 
 static void print_table_header(const TableDef* schema) {
     for (int i = 0; i < schema->column_count; i++) {
@@ -491,7 +588,7 @@ static void print_row_data(const Row* row, const TableDef* schema) {
         if (row->is_null[col_idx]) {
             printf("%-20s", "NULL");
         } else {
-            printf("%-20s", row->values[col_idx].value);
+            printf("%-20s", repr(&row->values[col_idx]));
         }
     }
     printf("\n");
@@ -502,9 +599,14 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
         if (current->project.expressions[i]->type == EXPR_COLUMN) {
             printf("%-20s", current->project.expressions[i]->column_name);
         } else if (current->project.expressions[i]->type == EXPR_AGGREGATE_FUNC) {
-            printf("%-20s", current->project.expressions[i]->aggregate.func_name);
+            printf("%-20s", 
+                current->project.expressions[i]->aggregate.func_type == FUNC_COUNT ? "COUNT" :
+                current->project.expressions[i]->aggregate.func_type == FUNC_SUM ? "SUM" :
+                current->project.expressions[i]->aggregate.func_type == FUNC_AVG ? "AVG" :
+                current->project.expressions[i]->aggregate.func_type == FUNC_MIN ? "MIN" :
+                current->project.expressions[i]->aggregate.func_type == FUNC_MAX ? "MAX" : "UNKNOWN");
         } else if (current->project.expressions[i]->type == EXPR_VALUE &&
-                   strcmp(current->project.expressions[i]->value.value, "*") == 0) {
+                   strcmp(current->project.expressions[i]->value.char_val, "*") == 0) {
             for (int j = 0; j < schema->column_count; j++) {
                 printf("%-20s", schema->columns[j].name);
             }
@@ -519,7 +621,7 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
 static void print_project_separator(const IRNode* current, const TableDef* schema) {
     for (int i = 0; i < current->project.expression_count; i++) {
         if (current->project.expressions[i]->type == EXPR_VALUE &&
-            strcmp(current->project.expressions[i]->value.value, "*") == 0) {
+            strcmp(current->project.expressions[i]->value.char_val, "*") == 0) {
             for (int j = 0; j < schema->column_count; j++) {
                 printf("%-20s", "--------------------");
             }
@@ -534,423 +636,504 @@ static void print_project_separator(const IRNode* current, const TableDef* schem
 static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema) {
     for (int col_idx = 0; col_idx < current->project.expression_count; col_idx++) {
         if (current->project.expressions[col_idx]->type == EXPR_VALUE &&
-            strcmp(current->project.expressions[col_idx]->value.value, "*") == 0) {
+            strcmp(current->project.expressions[col_idx]->value.char_val, "*") == 0) {
             for (int j = 0; j < schema->column_count; j++) {
                 if (row->is_null[j]) {
                     printf("%-20s", "NULL");
                 } else {
-                    printf("%-20s", row->values[j].value);
+                    printf("%-20s", repr(&row->values[j]));
                 }
             }
             break;
+        } else if (current->project.expressions[col_idx]->type == EXPR_AGGREGATE_FUNC) {
+            // Skip aggregate functions in project - they were already handled by exec_aggregate
+            printf("%-20s", "");
         } else {
-            Value val = eval_select_expression(current->project.expressions[col_idx],
-                                                   row, schema);
-
-            if (is_null(val)) {
+            Value val = eval_select_expression(current->project.expressions[col_idx], row, schema);
+            if (is_null(&val)) {
                 printf("%-20s", "NULL");
             } else {
-                printf("%-20s", val.value);
+                printf("%-20s", repr(&val));
             }
         }
     }
     printf("\n");
 }
-static void update_aggregate_state(AggregateState* state, Value val, const IRAggregate* agg) {
+
+static void update_aggregate_state(AggState* state, const Value* val,
+                                   const IRAggregate* agg) {
     if (is_null(val)) {
         return;  // Skip NULL values
     }
 
     if (agg->distinct) {
         for (int i = 0; i < state->distinct_count; i++) {
-            if (state->seen_values[i] && compare_values(&val, (Value*)state->seen_values[i]) == 0) {
+            if (state->seen_values[i] && compare_values(val, (Value*)state->seen_values[i]) == 0) {
                 return;  // Skip duplicate
             }
         }
         if (state->distinct_count < MAX_ROWS) {
-            char* val_copy = malloc(strlen(val.value) + 1);
+            const char* char_val = val->char_val;
+            if (val->type == TYPE_INT) {
+                static char int_buf[32];
+                snprintf(int_buf, sizeof(int_buf), "%d", val->int_val);
+                char_val = int_buf;
+            } else if (val->type == TYPE_FLOAT) {
+                static char float_buf[32];
+                snprintf(float_buf, sizeof(float_buf), "%.6f", val->float_val);
+                char_val = float_buf;
+            }
+            char* val_copy = malloc(strlen(char_val) + 1);
             if (val_copy) {
-                strcpy(val_copy, val.value);
+                strcpy(val_copy, char_val);
                 state->seen_values[state->distinct_count] = val_copy;
                 state->distinct_count++;
             }
         }
     }
 
-    if (strcmp(agg->aggregate_func, "SUM") == 0 || strcmp(agg->aggregate_func, "AVG") == 0) {
-        if (val.type == TYPE_FLOAT) {
-            state->sum += atof(val.value);
+    if (agg->func_type == FUNC_SUM || agg->func_type == FUNC_AVG) {
+        if (val->type == TYPE_FLOAT) {
+            state->sum += val->float_val;
+        } else if (val->type == TYPE_INT) {
+            state->sum += val->int_val;
         } else {
-            state->sum += atoi(val.value);
+            log_msg(LOG_ERROR, "Summing non-numeric type '%s' of type '%s'", repr(val), val->type);
         }
     }
 
-    if (strcmp(agg->aggregate_func, "COUNT") == 0) {
+    if (agg->func_type == FUNC_COUNT || agg->func_type == FUNC_AVG) {
         if (!agg->count_all) {
             state->count++;  // Count non-NULL values
         }
     }
 
-    if (strcmp(agg->aggregate_func, "MIN") == 0) {
+    if (agg->func_type == FUNC_MIN) {
         if (!state->has_min) {
-            state->min_val = val;
+            state->min_val = *val;
             state->has_min = true;
         } else {
-            if (compare_values(&val, &state->min_val) < 0) {
-                state->min_val = val;
+            if (compare_values(val, &(state->min_val)) < 0) {
+                state->min_val = *val;
             }
         }
     }
 
-    if (strcmp(agg->aggregate_func, "MAX") == 0) {
+    if (agg->func_type == FUNC_MAX) {
         if (!state->has_max) {
-            state->max_val = val;
+            state->max_val = *val;
             state->has_max = true;
         } else {
-            if (compare_values(&val, &state->max_val) > 0) {
-                state->max_val = val;
+            if (compare_values(val, &(state->max_val)) > 0) {
+                state->max_val = *val;
             }
         }
     }
 }
 
-static Value compute_aggregate(const char* func_name, AggregateState* state, DataType return_type) {
+static Value compute_aggregate(AggFuncType func_type, AggState* state,
+                               DataType return_type) {
     Value result;
 
-    if (strcmp(func_name, "SUM") == 0) {
+    if (func_type == FUNC_SUM) {
         if (return_type == TYPE_FLOAT) {
-            snprintf(result.value, MAX_STRING_LEN, "%.6f", state->sum);
             result.type = TYPE_FLOAT;
+            result.float_val = state->sum;
+            return result;
         } else {
             // Check for overflow
             if (state->sum > INT_MAX || state->sum < INT_MIN) {
                 log_msg(LOG_ERROR, "compute_aggregate: Integer overflow in SUM");
-                strcpy(result.value, "ERROR");
-                result.type = TYPE_STRING;
+                return VAL_ERROR;
             } else {
-                snprintf(result.value, MAX_STRING_LEN, "%.0f", state->sum);
                 result.type = TYPE_INT;
+                result.int_val = (int)state->sum;
+                return result;
             }
         }
-    } else if (strcmp(func_name, "COUNT") == 0) {
-        snprintf(result.value, MAX_STRING_LEN, "%d", state->count);
+    } else if (func_type == FUNC_COUNT) {
         result.type = TYPE_INT;
-    } else if (strcmp(func_name, "AVG") == 0) {
+        result.int_val = state->count;
+        return result;
+    } else if (func_type == FUNC_AVG) {
         if (state->count == 0) {
-            strcpy(result.value, "NULL");
-            result.type = TYPE_STRING;
+            return VAL_NULL;
         } else {
-            snprintf(result.value, MAX_STRING_LEN, "%.6f", state->sum / state->count);
             result.type = TYPE_FLOAT;
+            result.float_val = state->sum / state->count;
+            return result;
         }
-    } else if (strcmp(func_name, "MIN") == 0) {
+    } else if (func_type == FUNC_MIN) {
         if (!state->has_min) {
-            strcpy(result.value, "NULL");
-            result.type = TYPE_STRING;
+            return VAL_NULL;
         } else {
-            result = state->min_val;
+            return state->min_val;
         }
-    } else if (strcmp(func_name, "MAX") == 0) {
+    } else if (func_type == FUNC_MAX) {
         if (!state->has_max) {
-            strcpy(result.value, "NULL");
-            result.type = TYPE_STRING;
+            return VAL_NULL;
         } else {
-            result = state->max_val;
+            return state->max_val;
         }
-    } else {
-        strcpy(result.value, "ERROR");
-        result.type = TYPE_STRING;
     }
 
-    return result;
+    return VAL_ERROR;
 }
 
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
-    if (!expr) {
-        Value null_val;
-        strcpy(null_val.value, "NULL");
-        null_val.type = TYPE_STRING;
-        return null_val;
-    }
-
+    if (!expr) return VAL_NULL;
     switch (expr->type) {
         case EXPR_COLUMN:
             return get_column_value(row, schema, expr->column_name);
         case EXPR_VALUE:
             return expr->value;
         case EXPR_AGGREGATE_FUNC:
-            log_msg(LOG_WARN,
+            log_msg(LOG_ERROR,
                     "eval_select_expression: Aggregate function in expression evaluation");
-            {
-                Value error_val;
-                strcpy(error_val.value, "ERROR");
-                error_val.type = TYPE_STRING;
-                return error_val;
-            }
+            return VAL_ERROR;
         case EXPR_SCALAR_FUNC:
             return eval_scalar_function(expr, row, schema);
         default: {
-            Value error_val;
-            strcpy(error_val.value, "ERROR");
-            error_val.type = TYPE_STRING;
-            return error_val;
+            return VAL_ERROR;
         }
     }
 }
 
-static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema) {
-    Value result;
-    result.type = TYPE_STRING;
-    strcpy(result.value, "ERROR");
+static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema) {
+    Value result = VAL_ERROR;
 
-    if (strcmp(expr->scalar.func_name, "ABS") == 0) {
+    if (expr->scalar.func_type == FUNC_ABS) {
         if (expr->scalar.arg_count != 1) return result;
         Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        if (is_null(&arg)) return VAL_NULL;
+
+        if (arg.type == TYPE_INT) {
+            int abs_val = arg.int_val < 0 ? -arg.int_val : arg.int_val;
+            result = create_int(abs_val);
         }
-        
-        if (arg.type == TYPE_INT || arg.type == TYPE_FLOAT) {
-            double val = atof(arg.value);
-            double abs_val = val < 0 ? -val : val;
-            if (arg.type == TYPE_INT) {
-                snprintf(result.value, MAX_STRING_LEN, "%.0f", abs_val);
-                result.type = TYPE_INT;
-            } else {
-                snprintf(result.value, MAX_STRING_LEN, "%.6f", abs_val);
-                result.type = TYPE_FLOAT;
-            }
+        if (arg.type == TYPE_FLOAT) {
+            double abs_val = arg.float_val < 0 ? -arg.float_val : arg.float_val;
+            result = create_float(abs_val);
         }
-    } else if (strcmp(expr->scalar.func_name, "UPPER") == 0) {
+    } else if (expr->scalar.func_type == FUNC_SQRT) {
         if (expr->scalar.arg_count != 1) return result;
         Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        if (is_null(&arg)) return VAL_NULL;
+        if (arg.type != TYPE_INT && arg.type != TYPE_FLOAT) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function found non-numeric value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&arg), arg.type);
+            return VAL_ERROR;
         }
-        
-        for (int i = 0; arg.value[i] && i < MAX_STRING_LEN - 1; i++) {
-            result.value[i] = toupper(arg.value[i]);
+
+        double val;
+        if (arg.type == TYPE_FLOAT) {
+            val = arg.float_val;
+            if (val < 0) return VAL_NULL;
+        } else if (arg.type == TYPE_INT) {
+            val = arg.int_val;
+            if (val < 0) return VAL_NULL;
+        } else {
+            return VAL_ERROR;
         }
-        result.type = TYPE_STRING;
-    } else if (strcmp(expr->scalar.func_name, "LOWER") == 0) {
-        if (expr->scalar.arg_count != 1) return result;
-        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
-        }
-        
-        for (int i = 0; arg.value[i] && i < MAX_STRING_LEN - 1; i++) {
-            result.value[i] = tolower(arg.value[i]);
-        }
-        result.type = TYPE_STRING;
-    } else if (strcmp(expr->scalar.func_name, "LENGTH") == 0) {
-        if (expr->scalar.arg_count != 1) return result;
-        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
-        }
-        
-        int len = strlen(arg.value);
-        snprintf(result.value, MAX_STRING_LEN, "%d", len);
-        result.type = TYPE_INT;
-    } else if (strcmp(expr->scalar.func_name, "MID") == 0 || strcmp(expr->scalar.func_name, "SUBSTRING") == 0) {
-        if (expr->scalar.arg_count < 2 || expr->scalar.arg_count > 3) return result;
-        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        Value start_arg = eval_select_expression(expr->scalar.args[1], row, schema);
-        
-        if (strcmp(str_arg.value, "NULL") == 0 || strcmp(start_arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
-        }
-        
-        int start = atoi(start_arg.value) - 1;
-        if (start < 0) start = 0;
-        
-        int len = strlen(str_arg.value);
-        if (start >= len) {
-            strcpy(result.value, "");
-            return result;
-        }
-        
-        int max_len = len - start;
-        if (expr->scalar.arg_count == 3) {
-            Value length_arg = eval_select_expression(expr->scalar.args[2], row, schema);
-            if (strcmp(length_arg.value, "NULL") == 0) {
-                strcpy(result.value, "NULL");
-                return result;
-            }
-            int requested_len = atoi(length_arg.value);
-            if (requested_len < max_len) max_len = requested_len;
-        }
-        
-        strncpy(result.value, str_arg.value + start, max_len);
-        result.value[max_len] = '\0';
-        result.type = TYPE_STRING;
-    } else if (strcmp(expr->scalar.func_name, "LEFT") == 0) {
+
+        result.float_val = sqrt(val);
+        result.type = TYPE_FLOAT;
+    } else if (expr->scalar.func_type == FUNC_MOD) {
         if (expr->scalar.arg_count != 2) return result;
-        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        Value len_arg = eval_select_expression(expr->scalar.args[1], row, schema);
-        
-        if (strcmp(str_arg.value, "NULL") == 0 || strcmp(len_arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        Value arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
+
+        if (is_null(&arg1) || is_null(&arg2)) {
+            return VAL_NULL;
         }
-        
-        int len = atoi(len_arg.value);
-        int str_len = strlen(str_arg.value);
-        if (len > str_len) len = str_len;
-        if (len < 0) len = 0;
-        
-        strncpy(result.value, str_arg.value, len);
-        result.value[len] = '\0';
-        result.type = TYPE_STRING;
-    } else if (strcmp(expr->scalar.func_name, "RIGHT") == 0) {
+
+        double val1 = value_to_double(&arg1);
+        double val2 = value_to_double(&arg2);
+        if (val2 == 0) {
+            return VAL_NULL;
+        }
+
+        double mod_val = fmod(val1, val2);
+        result = create_float(mod_val);
+    } else if (expr->scalar.func_type == FUNC_POW) {
         if (expr->scalar.arg_count != 2) return result;
-        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        Value len_arg = eval_select_expression(expr->scalar.args[1], row, schema);
-        
-        if (strcmp(str_arg.value, "NULL") == 0 || strcmp(len_arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        Value arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
+
+        if (is_null(&arg1) || is_null(&arg2)) {
+            return VAL_NULL;
         }
-        
-        int len = atoi(len_arg.value);
-        int str_len = strlen(str_arg.value);
-        if (len > str_len) len = str_len;
-        if (len < 0) len = 0;
-        
-        int start = str_len - len;
-        strcpy(result.value, str_arg.value + start);
-        result.type = TYPE_STRING;
-    } else if (strcmp(expr->scalar.func_name, "ROUND") == 0) {
+
+        double val1 = value_to_double(&arg1);
+        double val2 = value_to_double(&arg2);
+
+        double power_val = pow(val1, val2);
+        result = create_float(power_val);
+    } else if (expr->scalar.func_type == FUNC_ROUND) {
         if (expr->scalar.arg_count < 1 || expr->scalar.arg_count > 2) return result;
         Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        if (is_null(&arg)) return VAL_NULL;
+        if (arg.type != TYPE_INT && arg.type != TYPE_FLOAT) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function found non-numeric value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&arg), arg.type);
+            return VAL_ERROR;
         }
-        
-        double val = atof(arg.value);
+
+        double val = value_to_double(&arg);
         int decimals = 0;
+
         if (expr->scalar.arg_count == 2) {
             Value dec_arg = eval_select_expression(expr->scalar.args[1], row, schema);
-            if (strcmp(dec_arg.value, "NULL") == 0) {
-                strcpy(result.value, "NULL");
-                return result;
+            if (is_null(&dec_arg)) return VAL_NULL;
+            if (dec_arg.type != TYPE_INT) {
+                log_msg(LOG_ERROR,
+                        "eval_scalar_function: %s function found non-integer value '%s' of "
+                        "type '%s'",
+                        expr->scalar.func_type, repr(&arg), arg.type);
+                return VAL_ERROR;
             }
-            decimals = atoi(dec_arg.value);
+            decimals = dec_arg.int_val;
         }
-        
+
         if (decimals == 0) {
             double rounded = round(val);
-            snprintf(result.value, MAX_STRING_LEN, "%.0f", rounded);
+            result.int_val = (int)rounded;
             result.type = TYPE_INT;
         } else {
             double factor = pow(10, decimals);
             double rounded = round(val * factor) / factor;
-            snprintf(result.value, MAX_STRING_LEN, "%.*f", decimals, rounded);
+            result.float_val = rounded;
             result.type = TYPE_FLOAT;
         }
-    } else if (strcmp(expr->scalar.func_name, "FLOOR") == 0) {
+    } else if (expr->scalar.func_type == FUNC_FLOOR) {
         if (expr->scalar.arg_count != 1) return result;
         Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        if (is_null(&arg)) return VAL_NULL;
+        if (arg.type != TYPE_INT && arg.type != TYPE_FLOAT) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function found non-numeric value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&arg), arg.type);
+            return VAL_ERROR;
         }
-        
-        double val = atof(arg.value);
+
+        double val = value_to_double(&arg);
         double floored = floor(val);
-        snprintf(result.value, MAX_STRING_LEN, "%.0f", floored);
+        result.int_val = (int)floored;
         result.type = TYPE_INT;
-    } else if (strcmp(expr->scalar.func_name, "CEIL") == 0) {
+    } else if (expr->scalar.func_type == FUNC_CEIL) {
         if (expr->scalar.arg_count != 1) return result;
         Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        if (is_null(&arg)) {
+            return VAL_NULL;
         }
-        
-        double val = atof(arg.value);
+
+        double val = value_to_double(&arg);
         double ceiled = ceil(val);
-        snprintf(result.value, MAX_STRING_LEN, "%.0f", ceiled);
+        result = create_int((int)ceiled);
         result.type = TYPE_INT;
-    } else if (strcmp(expr->scalar.func_name, "SQRT") == 0) {
+    }
+
+    return result;
+}
+
+static Value eval_string_function(const Expr* expr, const Row* row, const TableDef* schema) {
+    Value result = VAL_ERROR;
+
+    if (expr->scalar.func_type == FUNC_UPPER) {
         if (expr->scalar.arg_count != 1) return result;
         Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
-        if (strcmp(arg.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
+        if (is_null(&arg)) return VAL_NULL;
+        if (arg.type != TYPE_STRING) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function found non-string value '%s' of type '%s'",
+                    expr->scalar.func_type, repr(&arg), arg.type);
+            return VAL_ERROR;
+        }
+
+        result.char_val = malloc(strlen(arg.char_val) + 1);
+        for (int i = 0; arg.char_val[i] && i < MAX_STRING_LEN - 1; i++) {
+            result.char_val[i] = toupper(arg.char_val[i]);
+        }
+        result.char_val[strlen(arg.char_val)] = '\0';
+        result.type = TYPE_STRING;
+    } else if (expr->scalar.func_type == FUNC_LOWER) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (is_null(&arg)) return VAL_NULL;
+        if (arg.type != TYPE_STRING) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function found non-string value '%s' of type '%s'",
+                    expr->scalar.func_type, repr(&arg), arg.type);
+            return VAL_ERROR;
+        }
+
+        result.char_val = malloc(strlen(arg.char_val) + 1);
+        for (int i = 0; arg.char_val[i] && i < MAX_STRING_LEN - 1; i++) {
+            result.char_val[i] = tolower(arg.char_val[i]);
+        }
+        result.char_val[strlen(arg.char_val)] = '\0';
+        result.type = TYPE_STRING;
+    } else if (expr->scalar.func_type == FUNC_LEN) {
+        if (expr->scalar.arg_count != 1) return result;
+        Value arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        if (is_null(&arg)) return VAL_NULL;
+        if (arg.type != TYPE_STRING) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function found non-string value '%s' of type '%s'",
+                    expr->scalar.func_type, repr(&arg), arg.type);
+            return VAL_ERROR;
+        }
+
+        int len = strlen(arg.char_val);
+        result = create_int(len);
+    } else if (expr->scalar.func_type == FUNC_MID) {
+        if (expr->scalar.arg_count < 2 || expr->scalar.arg_count > 3) return result;
+        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value start_arg = eval_select_expression(expr->scalar.args[1], row, schema);
+
+        if (is_null(&str_arg) || is_null(&start_arg)) return VAL_NULL;
+        if (str_arg.type != TYPE_STRING) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function string input found non-string value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&str_arg), str_arg.type);
+            return VAL_ERROR;
+        }
+
+        if (start_arg.type != TYPE_INT) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function index input found non-integer value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&start_arg), start_arg.type);
+            return VAL_ERROR;
+        }
+
+        int start = start_arg.int_val - 1;
+        if (start < 0) start = 0;
+
+        int len = strlen(str_arg.char_val);
+        if (start >= len) {
+            result.char_val = malloc(1);
+            strcpy(result.char_val, "");
+            result.type = TYPE_STRING;
             return result;
         }
-        
-        double val = atof(arg.value);
-        if (val < 0) {
-            strcpy(result.value, "NULL");
-            return result;
+
+        int max_len = len - start;
+        if (expr->scalar.arg_count == 3) {
+            Value length_arg = eval_select_expression(expr->scalar.args[2], row, schema);
+            if (is_null(&length_arg)) return VAL_NULL;
+            int requested_len = atoi(length_arg.char_val);
+            if (requested_len < max_len) max_len = requested_len;
         }
-        
-        double sqrt_val = sqrt(val);
-        snprintf(result.value, MAX_STRING_LEN, "%.6f", sqrt_val);
-        result.type = TYPE_FLOAT;
-    } else if (strcmp(expr->scalar.func_name, "MOD") == 0) {
+
+        result.char_val = malloc(max_len + 1);
+        strncpy(result.char_val, str_arg.char_val + start, max_len);
+        result.char_val[max_len] = '\0';
+        result.type = TYPE_STRING;
+    } else if (expr->scalar.func_type == FUNC_LEFT) {
         if (expr->scalar.arg_count != 2) return result;
-        Value arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
-        Value arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
-        
-        if (strcmp(arg1.value, "NULL") == 0 || strcmp(arg2.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value len_arg = eval_select_expression(expr->scalar.args[1], row, schema);
+
+        if (is_null(&str_arg) || is_null(&len_arg)) return VAL_NULL;
+        if (str_arg.type != TYPE_STRING) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function string input found non-string value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&str_arg), str_arg.type);
+            return VAL_ERROR;
         }
-        
-        double val1 = atof(arg1.value);
-        double val2 = atof(arg2.value);
-        if (val2 == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+
+        if (len_arg.type != TYPE_INT) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function index input found non-integer value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&len_arg), len_arg.type);
+            return VAL_ERROR;
         }
-        
-        double mod_val = fmod(val1, val2);
-        snprintf(result.value, MAX_STRING_LEN, "%.6f", mod_val);
-        result.type = TYPE_FLOAT;
-    } else if (strcmp(expr->scalar.func_name, "POWER") == 0) {
+
+        int len = len_arg.int_val;
+        int str_len = strlen(str_arg.char_val);
+        if (len > str_len) len = str_len;
+        if (len < 0) len = 0;
+
+        result.char_val = malloc(len + 1);
+        strncpy(result.char_val, str_arg.char_val, len);
+        result.char_val[len] = '\0';
+        result.type = TYPE_STRING;
+    } else if (expr->scalar.func_type == FUNC_RIGHT) {
         if (expr->scalar.arg_count != 2) return result;
-        Value arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
-        Value arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
-        
-        if (strcmp(arg1.value, "NULL") == 0 || strcmp(arg2.value, "NULL") == 0) {
-            strcpy(result.value, "NULL");
-            return result;
+        Value str_arg = eval_select_expression(expr->scalar.args[0], row, schema);
+        Value len_arg = eval_select_expression(expr->scalar.args[1], row, schema);
+
+        if (is_null(&str_arg) || is_null(&len_arg)) return VAL_NULL;
+        if (str_arg.type != TYPE_STRING) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function string input found non-string value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&str_arg), str_arg.type);
+            return VAL_ERROR;
         }
-        
-        double val1 = atof(arg1.value);
-        double val2 = atof(arg2.value);
-        
-        double power_val = pow(val1, val2);
-        snprintf(result.value, MAX_STRING_LEN, "%.6f", power_val);
-        result.type = TYPE_FLOAT;
-    } else if (strcmp(expr->scalar.func_name, "CONCAT") == 0) {
+
+        if (len_arg.type != TYPE_INT) {
+            log_msg(LOG_ERROR,
+                    "eval_scalar_function: %s function index input found non-integer value '%s' of "
+                    "type '%s'",
+                    expr->scalar.func_type, repr(&len_arg), len_arg.type);
+            return VAL_ERROR;
+        }
+
+        int len = len_arg.int_val;
+        int str_len = strlen(str_arg.char_val);
+        if (len > str_len) len = str_len;
+        if (len < 0) len = 0;
+
+        int start = str_len - len;
+        result.char_val = malloc(len + 1);
+        strcpy(result.char_val, str_arg.char_val + start);
+        result.type = TYPE_STRING;
+    } else if (expr->scalar.func_type == FUNC_CONCAT) {
         if (expr->scalar.arg_count < 2) return result;
-        
-        strcpy(result.value, "");
+
+        result.char_val = malloc(MAX_STRING_LEN);
+        strcpy(result.char_val, "");
         for (int i = 0; i < expr->scalar.arg_count; i++) {
             Value arg = eval_select_expression(expr->scalar.args[i], row, schema);
-            if (strcmp(arg.value, "NULL") == 0) {
-                strcpy(result.value, "NULL");
-                return result;
+            if (is_null(&arg)) {
+                free(result.char_val);
+                return VAL_NULL;
             }
-            
-            if (strlen(result.value) + strlen(arg.value) < MAX_STRING_LEN) {
-                strcat(result.value, arg.value);
+
+            if (strlen(result.char_val) + strlen(arg.char_val) < MAX_STRING_LEN - 1) {
+                strcat(result.char_val, arg.char_val);
             }
         }
         result.type = TYPE_STRING;
     }
 
     return result;
+}
+
+static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema) {
+    Value result = eval_math_function(expr, row, schema);
+    if (result.type != TYPE_ERROR) {
+        return result;
+    }
+
+    result = eval_string_function(expr, row, schema);
+    if (result.type != TYPE_ERROR) {
+        return result;
+    }
+
+    log_msg(LOG_ERROR, "eval_scalar_function: Unknown scalar function '%s'",
+            expr->scalar.func_type);
+    return VAL_ERROR;
 }
 
 static void exec_delete_row(const IRNode* current) {
@@ -961,8 +1144,7 @@ static void exec_delete_row(const IRNode* current) {
     if (!table) {
         log_msg(LOG_ERROR, "exec_delete_row: Table '%s' does not exist",
                 current->delete_row.table_name);
-        log_msg(LOG_ERROR,
-                "exec_delete_row: Cannot delete from table '%s': table does not exist",
+        log_msg(LOG_ERROR, "exec_delete_row: Cannot delete from table '%s': table does not exist",
                 current->delete_row.table_name);
         return;
     }
@@ -1000,6 +1182,7 @@ void exec_ir(IRNode* ir) {
 
     IRNode* current = ir;
     while (current) {
+
         switch (current->type) {
             case IR_CREATE_TABLE:
                 exec_create_table(current);

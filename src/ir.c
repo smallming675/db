@@ -65,8 +65,7 @@ IRNode* ast_to_ir(ASTNode* ast) {
                         if (current->select.expression_count > 0) {
                             Expr* agg_expr = current->select.expressions[0];
                             if (agg_expr->type == EXPR_AGGREGATE_FUNC) {
-                                strcpy(aggregate_ir->aggregate.aggregate_func,
-                                       agg_expr->aggregate.func_name);
+                                aggregate_ir->aggregate.func_type = agg_expr->aggregate.func_type;
                                 aggregate_ir->aggregate.operand = agg_expr->aggregate.operand;
                                 aggregate_ir->aggregate.distinct = agg_expr->aggregate.distinct;
                                 aggregate_ir->aggregate.count_all = agg_expr->aggregate.count_all;

@@ -38,7 +38,9 @@ typedef enum {
   TOKEN_LIKE,
   TOKEN_AGGREGATE_FUNC, 
   TOKEN_SCALAR_FUNC,
-  TOKEN_DISTINCT       
+  TOKEN_DISTINCT,
+  TOKEN_TIME,
+  TOKEN_DATE       
 } TokenType;
 
 typedef struct {
@@ -46,7 +48,27 @@ typedef struct {
   char value[MAX_TOKEN_LEN];
 } Token;
 
-typedef enum { TYPE_INT, TYPE_STRING, TYPE_FLOAT } DataType;
+typedef enum {
+  TYPE_INT,
+  TYPE_STRING,
+  TYPE_FLOAT,
+  TYPE_TIME,
+  TYPE_DATE,
+  TYPE_NULL,
+  TYPE_ERROR
+} DataType;
+
+typedef struct {
+  int hour;
+  int minute;
+  int second;
+} TimeValue;
+
+typedef struct {
+  int year;
+  int month;
+  int day;
+} DateValue;
 
 typedef struct {
   char name[MAX_COLUMN_NAME_LEN];
@@ -70,8 +92,14 @@ typedef enum {
 } ASTType;
 
 typedef struct {
-  char value[MAX_STRING_LEN];
   DataType type;
+  union {
+    int int_val;
+    float float_val;
+    char *char_val;
+    TimeValue time_val;
+    DateValue date_val;
+  };
 } Value;
 
 typedef struct {
@@ -101,6 +129,31 @@ typedef enum {
   OP_LIKE
 } OperatorType;
 
+typedef enum { 
+  FUNC_COUNT, 
+  FUNC_SUM, 
+  FUNC_AVG, 
+  FUNC_MIN, 
+  FUNC_MAX 
+} AggFuncType;
+
+typedef enum {
+  FUNC_ABS,
+  FUNC_SQRT,
+  FUNC_MOD,
+  FUNC_POW,
+  FUNC_ROUND,
+  FUNC_FLOOR,
+  FUNC_CEIL,
+  FUNC_UPPER,
+  FUNC_LOWER,
+  FUNC_LEN,
+  FUNC_MID,
+  FUNC_LEFT,
+  FUNC_RIGHT,
+  FUNC_CONCAT
+} ScalarFuncType;
+
 typedef struct Expr {
   ExprType type;
   union {
@@ -116,16 +169,16 @@ typedef struct Expr {
       struct Expr *operand;
     } unary;
     struct {
-      char func_name[16];   
+      AggFuncType func_type;   
       struct Expr *operand; 
       bool distinct;       
       bool count_all;     
     } aggregate;
     struct {
-      char func_name[16];
+      ScalarFuncType func_type;
       struct Expr *args[3];
       int arg_count;
-    } scalar;         
+    } scalar;
   };
 } Expr;
 
@@ -141,8 +194,8 @@ typedef struct {
 
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
-  Expr *expressions[MAX_COLUMNS]; 
-  int expression_count;          
+  Expr *expressions[MAX_COLUMNS];
+  int expression_count;
   Expr *where_clause;
 } SelectNode;
 
@@ -183,8 +236,8 @@ typedef enum {
   IR_UPDATE_ROW,
   IR_DELETE_ROW,
   IR_FILTER,
-  IR_AGGREGATE, 
-  IR_PROJECT   
+  IR_AGGREGATE,
+  IR_PROJECT
 } IRType;
 
 typedef struct {
@@ -224,17 +277,17 @@ typedef struct {
 
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
-  char aggregate_func[16]; 
-  Expr *operand;           
-  bool distinct;           
-  bool count_all;          
-} IRAggregate;             
+  AggFuncType func_type;
+  Expr *operand;
+  bool distinct;
+  bool count_all;
+} IRAggregate;
 
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
-  Expr *expressions[MAX_COLUMNS]; 
+  Expr *expressions[MAX_COLUMNS];
   int expression_count;
-} IRProject; 
+} IRProject;
 
 typedef struct IRNode {
   IRType type;
@@ -246,8 +299,8 @@ typedef struct IRNode {
     IRUpdateRow update_row;
     IRDeleteRow delete_row;
     IRFilter filter;
-    IRAggregate aggregate; 
-    IRProject project;     
+    IRAggregate aggregate;
+    IRProject project;
   };
   struct IRNode *next;
 } IRNode;
@@ -264,7 +317,6 @@ typedef struct {
   int row_count;
 } Table;
 
-
 typedef struct {
   double sum;
   int count;
@@ -274,7 +326,7 @@ typedef struct {
   bool is_distinct;
   char *seen_values[MAX_ROWS];
   int distinct_count;
-} AggregateState;
+} AggState;
 
 Token *tokenize(const char *input);
 

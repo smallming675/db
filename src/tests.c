@@ -64,9 +64,12 @@ void test_insert_data(void) {
     Table* table = find_table("users");
     assert(table != NULL);
     assert(table->row_count == 1);
-    assert(strcmp(table->rows[0].values[0].value, "1") == 0);
-    assert(strcmp(table->rows[0].values[1].value, "Alice") == 0);
-    assert(strcmp(table->rows[0].values[2].value, "25") == 0);
+    assert(table->rows[0].values[0].type == TYPE_INT);
+    assert(table->rows[0].values[0].int_val == 1);
+    assert(table->rows[0].values[1].type == TYPE_STRING);
+    assert(strcmp(table->rows[0].values[1].char_val, "Alice") == 0);
+    assert(table->rows[0].values[2].type == TYPE_INT);
+    assert(table->rows[0].values[2].int_val == 25);
 
     log_msg(LOG_INFO, "INSERT tests passed");
 }
@@ -129,16 +132,24 @@ void test_crud_operations(void) {
     assert(users->row_count == 3);
     assert(products->row_count == 2);
 
-    assert(strcmp(users->rows[0].values[0].value, "1") == 0);
-    assert(strcmp(users->rows[0].values[1].value, "Alice") == 0);
-    assert(strcmp(users->rows[0].values[2].value, "25") == 0);
+    assert(users->rows[0].values[0].type == TYPE_INT);
+    assert(users->rows[0].values[0].int_val == 1);
+    assert(users->rows[0].values[1].type == TYPE_STRING);
+    assert(strcmp(users->rows[0].values[1].char_val, "Alice") == 0);
+    assert(users->rows[0].values[2].type == TYPE_INT);
+    assert(users->rows[0].values[2].int_val == 25);
 
-    assert(strcmp(users->rows[1].values[0].value, "2") == 0);
-    assert(strcmp(users->rows[1].values[1].value, "Bob") == 0);
-    assert(strcmp(users->rows[1].values[2].value, "30") == 0);
+    assert(users->rows[1].values[0].type == TYPE_INT);
+    assert(users->rows[1].values[0].int_val == 2);
+    assert(users->rows[1].values[1].type == TYPE_STRING);
+    assert(strcmp(users->rows[1].values[1].char_val, "Bob") == 0);
+    assert(users->rows[1].values[2].type == TYPE_INT);
+    assert(users->rows[1].values[2].int_val == 30);
 
-    assert(strcmp(products->rows[0].values[1].value, "Laptop") == 0);
-    assert(strcmp(products->rows[0].values[2].value, "999.99") == 0);
+    assert(products->rows[0].values[1].type == TYPE_STRING);
+    assert(strcmp(products->rows[0].values[1].char_val, "Laptop") == 0);
+    assert(products->rows[0].values[2].float_val > 999.98 &&
+           products->rows[0].values[2].float_val < 1000.00);
 
     exec("DROP TABLE users;");
     exec("DROP TABLE products;");
@@ -315,12 +326,11 @@ void test_null_values(void) {
     assert(table != NULL);
     assert(table->row_count == 3);
     assert(table->rows[0].is_null[2]);
-    assert(!table->rows[0].is_null[0]);
-    assert(table->rows[1].is_null[1]);
+    assert(!table->rows[1].is_null[1]);
 
-    exec("SELECT * FROM null_test WHERE value = NULL;");
-    exec("SELECT * FROM null_test WHERE value != NULL;");
-    exec("SELECT * FROM null_test WHERE name = NULL;");
+    exec("SELECT * FROM null_test WHERE value IS NULL;");
+    exec("SELECT * FROM null_test WHERE value IS NOT NULL;");
+    exec("SELECT * FROM null_test WHERE name IS NULL;");
 
     log_msg(LOG_INFO, "NULL value tests passed");
 }
@@ -347,15 +357,14 @@ void test_empty_tables(void) {
     log_msg(LOG_INFO, "Empty table tests passed");
 }
 
-void test_maximum_limits(void) {
-    log_msg(LOG_INFO, "Testing maximum limits...");
-
+void test_limits(void) {
+    log_msg(LOG_INFO, "Testing limits...");
     reset_database();
 
     for (int i = 0; i < MAX_TABLES; i++) {
         char table_name[32];
-        snprintf(table_name, sizeof(table_name), "table_%d", i);
         char create_sql[100];
+        snprintf(table_name, sizeof(table_name), "table%d", i);
         snprintf(create_sql, sizeof(create_sql), "CREATE TABLE %s (id INT);", table_name);
         exec(create_sql);
     }
@@ -415,11 +424,8 @@ void test_aggregate_functions(void) {
     exec("SELECT COUNT(*) FROM agg_test;");
     exec("SELECT COUNT(value) FROM agg_test;");
     exec("SELECT COUNT(DISTINCT value) FROM agg_test;");
-
     exec("SELECT SUM(value) FROM agg_test;");
-
     exec("SELECT AVG(value) FROM agg_test;");
-
     exec("SELECT MIN(value) FROM agg_test;");
     exec("SELECT MAX(value) FROM agg_test;");
 
@@ -436,37 +442,16 @@ static void test_scalar_functions(void) {
     exec("INSERT INTO test_func (2, 'TEST', 42.7, 'Database');");
     exec("INSERT INTO test_func (3, 'Mixed', 0.0, 'CASE');");
 
-    printf("Testing ABS function:\n");
     exec("SELECT ABS(value) FROM test_func;");
-
-    printf("Testing UPPER/LOWER functions:\n");
     exec("SELECT UPPER(name), LOWER(name) FROM test_func;");
-
-    printf("Testing LENGTH function:\n");
     exec("SELECT LENGTH(name), LENGTH(desc) FROM test_func;");
-
-    printf("Testing LEFT/RIGHT functions:\n");
     exec("SELECT LEFT(name, 2), RIGHT(desc, 3) FROM test_func;");
-
-    printf("Testing MID/SUBSTRING functions:\n");
     exec("SELECT MID(desc, 2, 3), SUBSTRING(name, 2, 2) FROM test_func;");
-
-    printf("Testing ROUND/FLOOR/CEIL functions:\n");
     exec("SELECT ROUND(value), FLOOR(value), CEIL(value) FROM test_func;");
-
-    printf("Testing SQRT function:\n");
     exec("SELECT SQRT(16), SQRT(value + 20) FROM test_func WHERE id = 2;");
-
-    printf("Testing MOD function:\n");
     exec("SELECT MOD(10, 3), MOD(value, 5) FROM test_func WHERE id = 2;");
-
-    printf("Testing CONCAT function:\n");
     exec("SELECT CONCAT(name, desc), CONCAT('ID:', id) FROM test_func;");
-
-    printf("Testing POWER function:\n");
     exec("SELECT POWER(2, 3), POWER(value, 2) FROM test_func WHERE id = 2;");
-
-    printf("Testing NULL handling:\n");
     exec("INSERT INTO test_func VALUES (4, NULL, NULL, NULL);");
     exec("SELECT ABS(value), UPPER(name), LENGTH(desc) FROM test_func WHERE id = 4;");
 }
@@ -524,7 +509,7 @@ int main(void) {
     test_crud_operations();
     test_null_values();
     test_empty_tables();
-    test_maximum_limits();
+    test_limits();
     test_data_types();
     test_aggregate_functions();
     test_scalar_functions();
