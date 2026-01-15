@@ -1,20 +1,11 @@
 #include "db.h"
 #include "logger.h"
 
-static void print_usage() {
-    printf("Database System\n");
-    printf("Supported SQL commands:\n");
-    printf("  CREATE TABLE table_name (col1 TYPE, col2 TYPE, ...);\n");
-    printf("  INSERT INTO table_name (value1, value2, ...);\n");
-    printf("  SELECT col1, col2, ... FROM table_name;\n");
-    printf("  DROP TABLE table_name;\n");
-    printf("  EXIT\n");
-    printf("\nData types: INT, STRING, FLOAT\n");
-    printf("String literals: Use single quotes\n");
-    printf("Example: CREATE TABLE users (id INT, name STRING, age INT);\n");
+static void print_usage(void) {
+
 }
 
-int main() {
+int main(void) {
     char input[1024];
     printf("Simple Database v1.0\n");
     printf("Type 'HELP' for usage, 'EXIT' to quit\n\n");

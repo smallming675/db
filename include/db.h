@@ -95,7 +95,7 @@ typedef struct {
   DataType type;
   union {
     int int_val;
-    float float_val;
+    double float_val;
     char *char_val;
     TimeValue time_val;
     DateValue date_val;
