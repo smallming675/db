@@ -1,5 +1,5 @@
-#ifndef DBMS_H
-#define DBMS_H
+#ifndef DB_H
+#define DB_H
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -26,24 +26,26 @@ typedef enum {
   TOKEN_RPAREN,
   TOKEN_EOF,
   TOKEN_ERROR,
-  TOKEN_EQUALS,        
-  TOKEN_NOT_EQUALS,    
-  TOKEN_LESS,          
-  TOKEN_LESS_EQUAL,    
-  TOKEN_GREATER,       
-  TOKEN_GREATER_EQUAL, 
+  TOKEN_EQUALS,
+  TOKEN_NOT_EQUALS,
+  TOKEN_LESS,
+  TOKEN_LESS_EQUAL,
+  TOKEN_GREATER,
+  TOKEN_GREATER_EQUAL,
   TOKEN_AND,
   TOKEN_OR,
   TOKEN_NOT,
   TOKEN_LIKE,
-  TOKEN_AGGREGATE_FUNC, 
+  TOKEN_AGGREGATE_FUNC,
   TOKEN_SCALAR_FUNC,
   TOKEN_DISTINCT,
   TOKEN_TIME,
   TOKEN_DATE,
   TOKEN_ORDER,
   TOKEN_BY,
-  TOKEN_AS
+  TOKEN_AS,
+  TOKEN_EXISTS,
+  TOKEN_IN
 } TokenType;
 
 typedef struct {
@@ -111,7 +113,7 @@ typedef struct {
 
 typedef struct {
   char input[1024];
-  Token* tokens;
+  Token *tokens;
   int token_count;
   int current_token_index;
   ParseError error;
@@ -149,7 +151,8 @@ typedef enum {
   EXPR_BINARY_OP,
   EXPR_UNARY_OP,
   EXPR_AGGREGATE_FUNC,
-  EXPR_SCALAR_FUNC
+  EXPR_SCALAR_FUNC,
+  EXPR_SUBQUERY
 } ExprType;
 
 typedef enum {
@@ -167,16 +170,13 @@ typedef enum {
   OP_SUBTRACT,
   OP_MULTIPLY,
   OP_DIVIDE,
-  OP_MODULUS
+  OP_MODULUS,
+  OP_IN,
+  OP_NOT_IN,
+  OP_EXISTS
 } OperatorType;
 
-typedef enum { 
-  FUNC_COUNT, 
-  FUNC_SUM, 
-  FUNC_AVG, 
-  FUNC_MIN, 
-  FUNC_MAX 
-} AggFuncType;
+typedef enum { FUNC_COUNT, FUNC_SUM, FUNC_AVG, FUNC_MIN, FUNC_MAX } AggFuncType;
 
 typedef enum {
   FUNC_ABS,
@@ -195,6 +195,8 @@ typedef enum {
   FUNC_CONCAT
 } ScalarFuncType;
 
+typedef struct ASTNode ASTNode;
+
 typedef struct Expr {
   ExprType type;
   char alias[MAX_COLUMN_NAME_LEN];
@@ -211,16 +213,19 @@ typedef struct Expr {
       struct Expr *operand;
     } unary;
     struct {
-      AggFuncType func_type;   
-      struct Expr *operand; 
-      bool distinct;       
-      bool count_all;     
+      AggFuncType func_type;
+      struct Expr *operand;
+      bool distinct;
+      bool count_all;
     } aggregate;
     struct {
       ScalarFuncType func_type;
       struct Expr *args[3];
       int arg_count;
     } scalar;
+    struct {
+      ASTNode *subquery;
+    } subquery;
   };
 } Expr;
 
@@ -362,15 +367,18 @@ typedef struct IRNode {
 } IRNode;
 
 typedef struct {
-  Value values[MAX_COLUMNS];
-  bool is_null[MAX_COLUMNS];
+  Value* values;
+  bool* is_null;
+  int value_count;
+  int value_capacity;
 } Row;
 
 typedef struct {
   char name[MAX_TABLE_NAME_LEN];
   TableDef schema;
-  Row rows[MAX_ROWS];
+  Row* rows;
   int row_count;
+  int row_capacity;
 } Table;
 
 typedef struct {
@@ -386,16 +394,18 @@ typedef struct {
 
 Token *tokenize(const char *input);
 
-void parse_error_init(ParseContext* ctx, const char* input, Token* tokens, int token_count);
-void parse_error_set(ParseContext* ctx, ParseErrorCode code, const char* message,
-                     const char* expected, const char* found, const char* suggestion);
-void parse_error_report(ParseContext* ctx);
-const char* parse_error_code_str(ParseErrorCode code);
+void parse_error_init(ParseContext *ctx, const char *input, Token *tokens,
+                      int token_count);
+void parse_error_set(ParseContext *ctx, ParseErrorCode code,
+                     const char *message, const char *expected,
+                     const char *found, const char *suggestion);
+void parse_error_report(ParseContext *ctx);
+const char *parse_error_code_str(ParseErrorCode code);
 
-ASTNode *parse_with_context(ParseContext* ctx, Token *tokens);
+ASTNode *parse_with_context(ParseContext *ctx, Token *tokens);
 ASTNode *parse(Token *tokens);
-ASTNode *parse_ex(const char* input, Token *tokens);
-ParseContext* parse_get_context(void);
+ASTNode *parse_ex(const char *input, Token *tokens);
+ParseContext *parse_get_context(void);
 IRNode *ast_to_ir(ASTNode *ast);
 void exec_ir(IRNode *ir);
 void free_tokens(Token *tokens);

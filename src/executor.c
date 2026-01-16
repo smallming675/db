@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "arraylist.h"
 #include "db.h"
 #include "logger.h"
 #include "table.h"
@@ -136,12 +137,12 @@ static void exec_filter(const IRNode* current) {
     if (!table) {
         char suggestion[256];
         const char* table_names[MAX_TABLES];
-        extern Table tables[];
-        extern int table_count;
-        for (int i = 0; i < table_count; i++) {
-            table_names[i] = tables[i].name;
+
+        int length = alist_length(&tables);
+        for (int i = 0; i < length; i++) {
+            table_names[i] = ((Table*)alist_get(&tables, i))->name;
         }
-        suggest_similar(current->filter.table_name, table_names, table_count, suggestion,
+        suggest_similar(current->filter.table_name, table_names, length, suggestion,
                         sizeof(suggestion));
         show_prominent_error("Table '%s' does not exist", current->filter.table_name);
         if (strlen(suggestion) > 0) {
@@ -171,12 +172,12 @@ static void exec_update_row(const IRNode* current) {
     if (!table) {
         char suggestion[256];
         const char* table_names[MAX_TABLES];
-        extern Table tables[];
-        extern int table_count;
-        for (int i = 0; i < table_count; i++) {
-            table_names[i] = tables[i].name;
+
+        int length = alist_length(&tables);
+        for (int i = 0; i < length; i++) {
+            table_names[i] = ((Table*)alist_get(&tables, i))->name;
         }
-        suggest_similar(current->update_row.table_name, table_names, table_count, suggestion,
+        suggest_similar(current->update_row.table_name, table_names, length, suggestion,
                         sizeof(suggestion));
         show_prominent_error("Table '%s' does not exist", current->update_row.table_name);
         if (strlen(suggestion) > 0) {
@@ -221,12 +222,11 @@ static void exec_aggregate(const IRNode* current) {
     if (!table) {
         char suggestion[256];
         const char* table_names[MAX_TABLES];
-        extern Table tables[];
-        extern int table_count;
-        for (int i = 0; i < table_count; i++) {
-            table_names[i] = tables[i].name;
+        int length = alist_length(&tables);
+        for (int i = 0; i < length; i++) {
+            table_names[i] = ((Table*)alist_get(&tables, i))->name;
         }
-        suggest_similar(current->aggregate.table_name, table_names, table_count, suggestion,
+        suggest_similar(current->aggregate.table_name, table_names, length, suggestion,
                         sizeof(suggestion));
         show_prominent_error("Table '%s' does not exist", current->aggregate.table_name);
         if (strlen(suggestion) > 0) {
@@ -521,10 +521,13 @@ static void exec_sort(const IRNode* current) {
                 }
             }
             if (swap_needed) {
-                Row temp;
-                copy_row(&temp, &table->rows[j], table->schema.column_count);
+                Row* temp = create_row(table->schema.column_count);
+                if (!temp) continue;
+                copy_row(temp, &table->rows[j], table->schema.column_count);
                 copy_row(&table->rows[j], &table->rows[j + 1], table->schema.column_count);
-                copy_row(&table->rows[j + 1], &temp, table->schema.column_count);
+                copy_row(&table->rows[j + 1], temp, table->schema.column_count);
+                /* Clean up */
+                free_row(temp);
             }
         }
     }
@@ -945,12 +948,11 @@ static void exec_delete_row(const IRNode* current) {
     if (!table) {
         char suggestion[256];
         const char* table_names[MAX_TABLES];
-        extern Table tables[];
-        extern int table_count;
-        for (int i = 0; i < table_count; i++) {
-            table_names[i] = tables[i].name;
+        int length = alist_length(&tables);
+        for (int i = 0; i < length; i++) {
+            table_names[i] = ((Table*)alist_get(&tables, i))->name;
         }
-        suggest_similar(current->delete_row.table_name, table_names, table_count, suggestion,
+        suggest_similar(current->delete_row.table_name, table_names, length, suggestion,
                         sizeof(suggestion));
         show_prominent_error("Table '%s' does not exist", current->delete_row.table_name);
         if (strlen(suggestion) > 0) {

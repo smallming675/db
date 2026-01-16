@@ -1,5 +1,7 @@
 #include "db.h"
 #include "logger.h"
+#include "arraylist.h"
+#include "table.h"
 #include <unistd.h>
 
 static void print_usage(void) {
@@ -12,6 +14,8 @@ static void print_usage(void) {
 
 int main(int argc, char* argv[]) {
     bool show_logs = false;
+
+    init_tables();
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--show-logs") == 0) {
@@ -77,11 +81,6 @@ int main(int argc, char* argv[]) {
         
         if (strlen(input) == 0) continue;
 
-        size_t input_len = strlen(input);
-        if (input_len > 0 && input[input_len - 1] == ';') {
-            input[input_len - 1] = '\0';
-        }
-        
         log_msg(LOG_DEBUG, "Processing command: '%s'", input);
         
         if (strcmp(input, "EXIT") == 0 || strcmp(input, "exit") == 0) {
@@ -95,15 +94,18 @@ int main(int argc, char* argv[]) {
         }
         
         if (strcmp(input, "LIST") == 0 || strcmp(input, "list") == 0) {
-            extern Table tables[];
-            extern int table_count;
+            int table_count = alist_length(&tables);
+            extern ArrayList tables;
             log_msg(LOG_INFO, "Listing %d tables", table_count);
             printf("Tables:\n");
             for (int i = 0; i < table_count; i++) {
-                printf("  '%s' (%d columns, %d rows)\n", 
-                       tables[i].name, tables[i].schema.column_count, tables[i].row_count);
-                log_msg(LOG_DEBUG, "Table '%s': %d columns, %d rows", 
-                       tables[i].name, tables[i].schema.column_count, tables[i].row_count);
+                Table* table = (Table*)alist_get(&tables, i);
+                if (table) {
+                    printf("  '%s' (%d columns, %d rows)\n", 
+                           table->name, table->schema.column_count, table->row_count);
+                    log_msg(LOG_DEBUG, "Table '%s': %d columns, %d rows", 
+                           table->name, table->schema.column_count, table->row_count);
+                }
             }
             continue;
         }
@@ -149,6 +151,7 @@ int main(int argc, char* argv[]) {
     }
     
     log_msg(LOG_INFO, "Database system shutting down");
+    alist_destroy(&tables);
     printf("\nGoodbye!\n");
     return 0;
 }

@@ -10,7 +10,7 @@ OBJECTS = $(SRC_SOURCES:$(SRCDIR)/%.c=$(BUILDDIR)/%.o)
 TARGET = $(BINDIR)/db
 TEST_TARGET = $(BINDIR)/test_db
 
-.PHONY: all clean debug run test test-integration test-all
+.PHONY: all clean debug run test
 
 all: $(TARGET)
 
@@ -55,7 +55,5 @@ help:
 	@echo "  debug   - Build with debug flags"
 	@echo "  run     - Build and run the database system"
 	@echo "  test    - Run unit tests"
-	@echo "  test-integration - Run integration tests"
-	@echo "  test-all - Run both unit and integration tests"
 	@echo "  clean   - Remove all build artifacts"
 	@echo "  help    - Show this help message"

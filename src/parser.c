@@ -25,6 +25,7 @@ static ParseContext g_parse_context;
 
 static void advance(void);
 static Expr* parse_primary(ParseContext* ctx);
+static Expr* parse_subquery(ParseContext* ctx);
 static Expr* parse_unary_expr(ParseContext* ctx);
 static Expr* parse_comparison_expr(ParseContext* ctx);
 static Expr* parse_and_expr(ParseContext* ctx);
@@ -39,6 +40,7 @@ static bool parse_column_def(ParseContext* ctx, ColumnDef* col);
 static Value parse_value(ParseContext* ctx);
 static ASTNode* parse_update(ParseContext* ctx);
 static ASTNode* parse_delete(ParseContext* ctx);
+static ASTNode* parse_select(ParseContext* ctx);
 
 const char* token_type_name(TokenType type) {
     switch (type) {
@@ -610,6 +612,9 @@ static ASTNode* parse_create_table(ParseContext* ctx) {
         return NULL;
     }
 
+    /* Allocate an AST node for the CREATE TABLE statement.
+     * This node will be freed by free_ast() after IR generation.
+     * memset ensures all union members and pointers are NULL/zero. */
     ASTNode* node = malloc(sizeof(ASTNode));
     if (!node) {
         parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
@@ -618,11 +623,16 @@ static ASTNode* parse_create_table(ParseContext* ctx) {
         return NULL;
     }
 
+    memset(node, 0, sizeof(ASTNode));
     node->type = AST_CREATE_TABLE;
     node->next = NULL;
 
-    strncpy(node->create_table.table_def.name, current_token[-1].value, MAX_TABLE_NAME_LEN - 1);
-    node->create_table.table_def.name[MAX_TABLE_NAME_LEN - 1] = '\0';
+    char* dest = node->create_table.table_def.name;
+    const char* src = current_token[-1].value;
+    size_t copy_len = strlen(src);
+    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
 
     log_msg(LOG_DEBUG, "parse_create_table: Table name = '%s'", node->create_table.table_def.name);
 
@@ -912,7 +922,66 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
         }
         return expr;
     }
+    if (match(TOKEN_EXISTS)) {
+        log_msg(LOG_DEBUG, "parse_unary_expr: Parsing EXISTS expression");
+        Expr* expr = malloc(sizeof(Expr));
+        expr->type = EXPR_SUBQUERY;
+        advance();
+        if (!expect(ctx, TOKEN_LPAREN, "EXISTS")) {
+            free(expr);
+            return NULL;
+        }
+        Expr* subquery_expr = parse_subquery(ctx);
+        if (!subquery_expr) {
+            free(expr);
+            return NULL;
+        }
+        expr->subquery.subquery = subquery_expr->subquery.subquery;
+        free(subquery_expr);
+        if (!expect(ctx, TOKEN_RPAREN, "EXISTS")) {
+            free(expr);
+            return NULL;
+        }
+        return expr;
+    }
     return parse_primary(ctx);
+}
+
+static Expr* parse_subquery(ParseContext* ctx) {
+    log_msg(LOG_DEBUG, "parse_subquery: Starting subquery parsing");
+
+    if (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "SELECT") != 0) {
+        log_msg(LOG_WARN, "parse_subquery: Expected SELECT keyword");
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected SELECT in subquery",
+                        "SELECT", current_token->value, "subquery");
+        return NULL;
+    }
+
+    advance();
+    ASTNode* subquery_ast = parse_select(ctx);
+    if (!subquery_ast) {
+        log_msg(LOG_WARN, "parse_subquery: Failed to parse subquery AST");
+        return NULL;
+    }
+
+    if (subquery_ast->type != AST_SELECT) {
+        log_msg(LOG_WARN, "parse_subquery: Subquery must be a SELECT statement");
+        free_ast(subquery_ast);
+        return NULL;
+    }
+
+    Expr* expr = malloc(sizeof(Expr));
+    if (!expr) {
+        log_msg(LOG_ERROR, "parse_subquery: Memory allocation failed");
+        free_ast(subquery_ast);
+        return NULL;
+    }
+
+    expr->type = EXPR_SUBQUERY;
+    expr->subquery.subquery = subquery_ast;
+
+    log_msg(LOG_DEBUG, "parse_subquery: Subquery parsed successfully");
+    return expr;
 }
 
 static Expr* parse_comparison_expr(ParseContext* ctx) {
@@ -1054,11 +1123,16 @@ static ASTNode* parse_insert(ParseContext* ctx) {
         return NULL;
     }
 
+    memset(node, 0, sizeof(ASTNode));
     node->type = AST_INSERT_ROW;
     node->next = NULL;
 
-    strncpy(node->insert.table_name, current_token[-1].value, MAX_TABLE_NAME_LEN - 1);
-    node->insert.table_name[MAX_TABLE_NAME_LEN - 1] = '\0';
+    char* dest = node->insert.table_name;
+    const char* src = current_token[-1].value;
+    size_t copy_len = strlen(src);
+    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
 
     log_msg(LOG_DEBUG, "parse_insert: Table name = '%s'", node->insert.table_name);
 
@@ -1117,6 +1191,7 @@ static ASTNode* parse_select(ParseContext* ctx) {
         return NULL;
     }
 
+    memset(node, 0, sizeof(ASTNode));
     node->type = AST_SELECT;
     node->next = NULL;
 
@@ -1366,11 +1441,16 @@ static ASTNode* parse_drop_table(ParseContext* ctx) {
         return NULL;
     }
 
+    memset(node, 0, sizeof(ASTNode));
     node->type = AST_DROP_TABLE;
     node->next = NULL;
 
-    strncpy(node->drop_table.table_name, current_token->value, MAX_TABLE_NAME_LEN - 1);
-    node->drop_table.table_name[MAX_TABLE_NAME_LEN - 1] = '\0';
+    char* dest = node->drop_table.table_name;
+    const char* src = current_token->value;
+    size_t copy_len = strlen(src);
+    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
 
     log_msg(LOG_DEBUG, "parse_drop_table: Table name = '%s'", node->drop_table.table_name);
     advance();
@@ -1392,11 +1472,16 @@ static ASTNode* parse_update(ParseContext* ctx) {
         return NULL;
     }
 
+    memset(node, 0, sizeof(ASTNode));
     node->type = AST_UPDATE_ROW;
     node->next = NULL;
 
-    strncpy(node->update.table_name, current_token[-1].value, MAX_TABLE_NAME_LEN - 1);
-    node->update.table_name[MAX_TABLE_NAME_LEN - 1] = '\0';
+    char* dest = node->update.table_name;
+    const char* src = current_token[-1].value;
+    size_t copy_len = strlen(src);
+    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
 
     log_msg(LOG_DEBUG, "parse_update: Table name = '%s'", node->update.table_name);
 
@@ -1491,11 +1576,16 @@ static ASTNode* parse_delete(ParseContext* ctx) {
         return NULL;
     }
 
+    memset(node, 0, sizeof(ASTNode));
     node->type = AST_DELETE_ROW;
     node->next = NULL;
 
-    strncpy(node->delete.table_name, current_token[-1].value, MAX_TABLE_NAME_LEN - 1);
-    node->delete.table_name[MAX_TABLE_NAME_LEN - 1] = '\0';
+    char* dest = node->delete.table_name;
+    const char* src = current_token[-1].value;
+    size_t copy_len = strlen(src);
+    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
 
     log_msg(LOG_DEBUG, "parse_delete: Table name = '%s'", node->delete.table_name);
 
