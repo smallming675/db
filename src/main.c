@@ -83,6 +83,12 @@ int main(int argc, char* argv[]) {
 
         log_msg(LOG_DEBUG, "Processing command: '%s'", input);
         
+        /* Remove trailing semicolon if present */
+        size_t input_len = strlen(input);
+        if (input_len > 0 && input[input_len - 1] == ';') {
+            input[input_len - 1] = '\0';
+        }
+        
         if (strcmp(input, "EXIT") == 0 || strcmp(input, "exit") == 0) {
             log_msg(LOG_INFO, "Exit command received");
             break;
@@ -101,10 +107,12 @@ int main(int argc, char* argv[]) {
             for (int i = 0; i < table_count; i++) {
                 Table* table = (Table*)alist_get(&tables, i);
                 if (table) {
-                    printf("  '%s' (%d columns, %d rows)\n", 
-                           table->name, table->schema.column_count, table->row_count);
-                    log_msg(LOG_DEBUG, "Table '%s': %d columns, %d rows", 
-                           table->name, table->schema.column_count, table->row_count);
+                    int col_count = alist_length(&table->schema.columns);
+                    int row_count = alist_length(&table->rows);
+                    printf("  '%s' (%d columns, %d rows)\n",
+                           table->name, col_count, row_count);
+                    log_msg(LOG_DEBUG, "Table '%s': %d columns, %d rows",
+                           table->name, col_count, row_count);
                 }
             }
             continue;

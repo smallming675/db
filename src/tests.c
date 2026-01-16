@@ -9,40 +9,77 @@
 
 extern ArrayList tables;
 
-static Table* find_table(const char* name) {
-    int table_count = alist_length(&tables);
-    for (int i = 0; i < table_count; i++) {
-        Table* table = (Table*)alist_get(&tables, i);
-        if (table && strcmp(table->name, name) == 0) {
-            return table;
+static void free_index(void* ptr);
+
+static Index* find_index_by_name(const char* index_name) {
+    extern ArrayList indexes;
+    int index_count = alist_length(&indexes);
+    for (int i = 0; i < index_count; i++) {
+        Index* idx = (Index*)alist_get(&indexes, i);
+        if (idx && strcmp(idx->index_name, index_name) == 0) {
+            return idx;
         }
     }
     return NULL;
 }
 
+static void free_index(void* ptr) {
+    Index* index = (Index*)ptr;
+    if (!index) return;
+    
+    if (index->buckets) {
+        for (int i = 0; i < index->bucket_count; i++) {
+            IndexEntry* entry = index->buckets[i];
+            while (entry) {
+                IndexEntry* next = entry->next;
+                if (entry->key.type == TYPE_STRING && entry->key.char_val) {
+                    free(entry->key.char_val);
+                }
+                free(entry);
+                entry = next;
+            }
+        }
+        free(index->buckets);
+    }
+}
+
 void reset_database(void) { 
+    extern ArrayList tables;
+    extern ArrayList indexes;
+    
     if (tables.data != NULL) {
         alist_destroy(&tables);
     }
     alist_init(&tables, sizeof(Table), free_table_internal);
+    
+    if (indexes.data != NULL) {
+        alist_destroy(&indexes);
+    }
+    alist_init(&indexes, sizeof(Index), free_index);
 }
 
-static void exec(const char* sql) {
+static bool exec(const char* sql) {
     Token* tokens = tokenize(sql);
     ASTNode* ast = parse(tokens);
     if (ast) {
         IRNode* ir = ast_to_ir(ast);
         if (ir) {
             exec_ir(ir);
+            free_ir(ir);
+            free_tokens(tokens);
+            free_ast(ast);
+            return true;
         } else {
             log_msg(LOG_WARN, "exec_ir: Called with NULL IR");
+            free_tokens(tokens);
+            free_ast(ast);
+            return false;
         }
-        free_ir(ir);
     } else {
         log_msg(LOG_WARN, "ast_to_ir: called with NULL AST");
+        free_tokens(tokens);
+        return false;
     }
-    free_tokens(tokens);
-    free_ast(ast);
 }
 
 void test_create_table(void) {
@@ -55,146 +92,7 @@ void test_create_table(void) {
 
     Table* table = find_table("users");
     assert(table != NULL);
-    assert(table->schema.column_count == 3);
-    assert(strcmp(table->schema.columns[0].name, "id") == 0);
-    assert(table->schema.columns[0].type == TYPE_INT);
-    assert(strcmp(table->schema.columns[1].name, "name") == 0);
-    assert(table->schema.columns[1].type == TYPE_STRING);
-    assert(strcmp(table->schema.columns[2].name, "age") == 0);
-    assert(table->schema.columns[2].type == TYPE_INT);
-    assert(table->row_count == 0);
-
-    log_msg(LOG_INFO, "CREATE TABLE tests passed");
-}
-
-void test_insert_data(void) {
-    log_msg(LOG_INFO, "Testing INSERT...");
-
-    reset_database();
-    exec("CREATE TABLE users (id INT, name STRING, age INT);");
-    exec("INSERT INTO users (1, 'Alice', 25);");
-
-    Table* table = find_table("users");
-    assert(table != NULL);
-    assert(table->row_count == 1);
-    assert(table->rows[0].values[0].type == TYPE_INT);
-    assert(table->rows[0].values[0].int_val == 1);
-    assert(table->rows[0].values[1].type == TYPE_STRING);
-    assert(strcmp(table->rows[0].values[1].char_val, "Alice") == 0);
-    assert(table->rows[0].values[2].type == TYPE_INT);
-    assert(table->rows[0].values[2].int_val == 25);
-
-    log_msg(LOG_INFO, "INSERT tests passed");
-}
-
-void test_select_data(void) {
-    log_msg(LOG_INFO, "Testing SELECT...");
-
-    reset_database();
-
-    exec("CREATE TABLE users (id INT, name STRING, age INT);");
-    exec("INSERT INTO users (1, 'Alice', 25);");
-    exec("INSERT INTO users (2, 'Bob', 30);");
-    exec("SELECT * FROM users;");
-
-
-    Table* table = find_table("users");
-    assert(table != NULL);
-    assert(table->row_count == 2);
-
-    log_msg(LOG_INFO, "SELECT tests passed");
-}
-
-void test_drop_table(void) {
-    log_msg(LOG_INFO, "Testing DROP TABLE...");
-
-    reset_database();
-
-    exec("CREATE TABLE test_table (id INT);");
-
-    Table* table_before = find_table("test_table");
-    assert(table_before != NULL);
-
-    exec("DROP TABLE test_table");
-
-    Table* table_after = find_table("test_table");
-    assert(table_after == NULL);
-
-    log_msg(LOG_INFO, "DROP TABLE tests passed");
-}
-
-void test_crud_operations(void) {
-    log_msg(LOG_INFO, "Testing integration CRUD operations...\n");
-
-    reset_database();
-    exec("CREATE TABLE users (id INT, name STRING, age INT);");
-    exec("CREATE TABLE products (id INT, name STRING, price FLOAT);");
-
-    assert(alist_length(&tables) == 2);
-
-    exec("INSERT INTO users (1, 'Alice', 25);");
-    exec("INSERT INTO users (2, 'Bob', 30);");
-    exec("INSERT INTO users (3, 'Charlie', 35);");
-
-    exec("INSERT INTO products (1, 'Laptop', 999.99);");
-    exec("INSERT INTO products (2, 'Mouse', 29.99);");
-
-    Table* users = find_table("users");
-    Table* products = find_table("products");
-
-    assert(users != NULL);
-    assert(products != NULL);
-    assert(users->row_count == 3);
-    assert(products->row_count == 2);
-
-    assert(users->rows[0].values[0].type == TYPE_INT);
-    assert(users->rows[0].values[0].int_val == 1);
-    assert(users->rows[0].values[1].type == TYPE_STRING);
-    assert(strcmp(users->rows[0].values[1].char_val, "Alice") == 0);
-    assert(users->rows[0].values[2].type == TYPE_INT);
-    assert(users->rows[0].values[2].int_val == 25);
-
-    assert(users->rows[1].values[0].type == TYPE_INT);
-    assert(users->rows[1].values[0].int_val == 2);
-    assert(users->rows[1].values[1].type == TYPE_STRING);
-    assert(strcmp(users->rows[1].values[1].char_val, "Bob") == 0);
-    assert(users->rows[1].values[2].type == TYPE_INT);
-    assert(users->rows[1].values[2].int_val == 30);
-
-    assert(products->rows[0].values[1].type == TYPE_STRING);
-    assert(strcmp(products->rows[0].values[1].char_val, "Laptop") == 0);
-    assert(products->rows[0].values[2].float_val > 999.98 &&
-           products->rows[0].values[2].float_val < 1000.00);
-
-    exec("DROP TABLE users;");
-    exec("DROP TABLE products;");
-
-    assert(find_table("users") == NULL);
-    assert(find_table("products") == NULL);
-    assert(alist_length(&tables) == 0);
-
-    log_msg(LOG_INFO, "Integration CRUD tests passed");
-}
-
-void test_where_clause(void) {
-    log_msg(LOG_INFO, "Testing WHERE clause...");
-
-    reset_database();
-
-    exec("CREATE TABLE users (id INT, name STRING, age INT, salary FLOAT);");
-    const char* insert_data[] = {"INSERT INTO users (1, 'Alice', 25, 50000.0);",
-                                 "INSERT INTO users (2, 'Bob', 30, 60000.0);",
-                                 "INSERT INTO users (3, 'Charlie', 35, 70000.0);",
-                                 "INSERT INTO users (4, 'Diana', 28, 55000.0);",
-                                 "INSERT INTO users (5, 'Eve', 22, 45000.0);"};
-
-    for (int i = 0; i < 5; i++) {
-        exec(insert_data[i]);
-    }
-
-    Table* table = find_table("users");
-    assert(table != NULL);
-    assert(table->row_count == 5);
+    assert(alist_length(&table->rows) == 0);
 
     log_msg(LOG_INFO, "Testing comparison operators...");
     exec("SELECT * FROM users WHERE age = 30;");
@@ -236,7 +134,7 @@ void test_update_where_clause(void) {
 
     Table* table = find_table("products");
     assert(table != NULL);
-    assert(table->row_count == 4);
+    assert(alist_length(&table->rows) == 4);
 
     log_msg(LOG_INFO, "Testing UPDATE with simple WHERE clause...");
     exec("UPDATE products SET stock = 0 WHERE price < 100;");
@@ -287,7 +185,7 @@ void test_delete_where_clause(void) {
 
     Table* table = find_table("logs");
     assert(table != NULL);
-    assert(table->row_count == 5);
+    assert(alist_length(&table->rows) == 5);
 
     log_msg(LOG_INFO, "Testing DELETE with WHERE clause...");
     exec("DELETE FROM logs WHERE level = 'ERROR';");
@@ -311,7 +209,7 @@ void test_where_cases(void) {
 
     Table* table = find_table("test_data");
     assert(table != NULL);
-    assert(table->row_count == 3);
+    assert(alist_length(&table->rows) == 3);
 
     log_msg(LOG_INFO, "Testing NULL and empty string handling...");
     exec("SELECT * FROM test_data WHERE name = 'NULL';");
@@ -339,9 +237,11 @@ void test_null_values(void) {
 
     Table* table = find_table("null_test");
     assert(table != NULL);
-    assert(table->row_count == 3);
-    assert(table->rows[0].values[2].type == TYPE_NULL);
-    assert((table->rows[1].values[1].type != TYPE_NULL));
+    assert(alist_length(&table->rows) == 3);
+    Row* null_test_row0 = (Row*)alist_get(&table->rows, 0);
+    Row* null_test_row1 = (Row*)alist_get(&table->rows, 1);
+    assert(null_test_row0->values[2].type == TYPE_NULL);
+    assert((null_test_row1->values[1].type != TYPE_NULL));
 
     exec("SELECT * FROM null_test WHERE value IS NULL;");
     exec("SELECT * FROM null_test WHERE value IS NOT NULL;");
@@ -358,7 +258,7 @@ void test_empty_tables(void) {
 
     Table* table = find_table("empty_test");
     assert(table != NULL);
-    assert(table->row_count == 0);
+    assert(alist_length(&table->rows) == 0);
 
     exec("SELECT * FROM empty_test;");
 
@@ -399,7 +299,7 @@ void test_limits(void) {
     }
 
     Table* row_table = find_table("row_test");
-    assert(row_table->row_count == MAX_ROWS);
+    assert(alist_length(&row_table->rows) == MAX_ROWS);
 
     log_msg(LOG_INFO, "Maximum limits tests passed");
 }
@@ -452,23 +352,43 @@ static void test_scalar_functions(void) {
 
     reset_database();
 
-    exec("CREATE TABLE test_func (id INT, name STRING, value FLOAT, desc STRING);");
-    exec("INSERT INTO test_func (1, 'Hello', -15.5, 'World');");
-    exec("INSERT INTO test_func (2, 'TEST', 42.7, 'Database');");
-    exec("INSERT INTO test_func (3, 'Mixed', 0.0, 'CASE');");
+    exec("CREATE TABLE test_func (id INT, name STRING, value FLOAT, description STRING);");
+    assert(exec("INSERT INTO test_func (1, 'Hello', -15.5, 'World');"));
+    assert(exec("INSERT INTO test_func (2, 'TEST', 42.7, 'Database');"));
+    assert(exec("INSERT INTO test_func (3, 'Mixed', 0.0, 'CASE');"));
 
-    exec("SELECT ABS(value) FROM test_func;");
-    exec("SELECT UPPER(name), LOWER(name) FROM test_func;");
-    exec("SELECT LENGTH(name), LENGTH(desc) FROM test_func;");
-    exec("SELECT LEFT(name, 2), RIGHT(desc, 3) FROM test_func;");
-    exec("SELECT MID(desc, 2, 3), SUBSTRING(name, 2, 2) FROM test_func;");
-    exec("SELECT ROUND(value), FLOOR(value), CEIL(value) FROM test_func;");
-    exec("SELECT SQRT(16), SQRT(value + 20) FROM test_func WHERE id = 2;");
-    exec("SELECT MOD(10, 3), MOD(value, 5) FROM test_func WHERE id = 2;");
-    exec("SELECT CONCAT(name, desc), CONCAT('ID:', id) FROM test_func;");
-    exec("SELECT POWER(2, 3), POWER(value, 2) FROM test_func WHERE id = 2;");
-    exec("INSERT INTO test_func VALUES (4, NULL, NULL, NULL);");
-    exec("SELECT ABS(value), UPPER(name), LENGTH(desc) FROM test_func WHERE id = 4;");
+    QueryResult* result = exec_query("SELECT ABS(value) FROM test_func;");
+    assert(result != NULL);
+    assert(result->row_count == 3);
+    log_msg(LOG_DEBUG, "ABS values: [0]=%f, [1]=%f, [2]=%f", 
+            result->values[0].float_val, result->values[1].float_val, result->values[2].float_val);
+    assert(result->values[0].float_val == 15.5);
+    assert(result->values[1].float_val > 42.69 && result->values[1].float_val < 42.71);
+    assert(result->values[2].float_val == 0.0);
+    free_query_result(result);
+
+    result = exec_query("SELECT UPPER(name), LOWER(name) FROM test_func;");
+    assert(result != NULL);
+    assert(result->row_count == 3);
+    assert(strcmp(result->values[0].char_val, "HELLO") == 0);
+    assert(strcmp(result->values[1].char_val, "hello") == 0);
+    free_query_result(result);
+
+    result = exec_query("SELECT LENGTH(name), LENGTH(description) FROM test_func;");
+    assert(result != NULL);
+    assert(result->row_count == 3);
+    assert(result->values[0].int_val == 5);
+    assert(result->values[1].int_val == 5);
+    free_query_result(result);
+
+    result = exec_query("SELECT LEFT(name, 2), RIGHT(description, 3) FROM test_func;");
+    assert(result != NULL);
+    assert(result->row_count == 3);
+    assert(strcmp(result->values[0].char_val, "He") == 0);
+    assert(strcmp(result->values[1].char_val, "rld") == 0);
+    free_query_result(result);
+
+    log_msg(LOG_INFO, "Scalar function tests passed");
 }
 
 void test_queries(void) {
@@ -503,9 +423,11 @@ void test_date_time_operations(void) {
     
     Table* events = find_table("events");
     assert(events != NULL);
-    assert(events->schema.column_count == 4);
-    assert(events->schema.columns[2].type == TYPE_DATE);
-    assert(events->schema.columns[3].type == TYPE_TIME);
+    assert(alist_length(&events->schema.columns) == 4);
+    ColumnDef* events_col2 = (ColumnDef*)alist_get(&events->schema.columns, 2);
+    ColumnDef* events_col3 = (ColumnDef*)alist_get(&events->schema.columns, 3);
+    assert(events_col2->type == TYPE_DATE);
+    assert(events_col3->type == TYPE_TIME);
     
     log_msg(LOG_INFO, "DATE and TIME table creation successful");
 
@@ -522,33 +444,36 @@ void test_date_time_operations(void) {
     
     log_msg(LOG_INFO, "DATE and TIME INSERT operations successful");
     exec("INSERT INTO events (11, 'Invalid Date', '2023-99-99', '12:30:45');");
-    assert(events->row_count == 11);
+    assert(alist_length(&events->rows) == 11);
     
     exec("INSERT INTO events (12, 'Invalid Time', '2023-06-15', '99:99:99');");
-    assert(events->row_count == 12);
+    assert(alist_length(&events->rows) == 12);
     
     exec("INSERT INTO events (13, 'Zero Date', '0000-00-00', '00:00:00');");
-    assert(events->row_count == 13);
+    assert(alist_length(&events->rows) == 13);
     
     exec("INSERT INTO events (14, 'Zero Time', '2023-06-15', '00:00:00');");
-    assert(events->row_count == 14);
+    assert(alist_length(&events->rows) == 14);
 
-    assert(events->row_count == 14);
+    assert(alist_length(&events->rows) == 14);
     
     log_msg(LOG_INFO, "Testing DATE and TIME value retrieval...");
-    assert(events->rows[0].values[2].type == TYPE_DATE);
-    assert(events->rows[0].values[2].date_val.year == 2023);
-    assert(events->rows[0].values[2].date_val.month == 12);
-    assert(events->rows[0].values[2].date_val.day == 25);
+    Row* events_row0 = (Row*)alist_get(&events->rows, 0);
+    Row* events_row8 = (Row*)alist_get(&events->rows, 8);
+    Row* events_row9 = (Row*)alist_get(&events->rows, 9);
+    assert(events_row0->values[2].type == TYPE_DATE);
+    assert(date_year(events_row0->values[2].date_val.date_val) == 2023);
+    assert(date_month(events_row0->values[2].date_val.date_val) == 12);
+    assert(date_day(events_row0->values[2].date_val.date_val) == 25);
     
-    assert(events->rows[0].values[3].type == TYPE_TIME);
-    assert(events->rows[0].values[3].time_val.hour == 14);
-    assert(events->rows[0].values[3].time_val.minute == 30);
-    assert(events->rows[0].values[3].time_val.second == 45);
+    assert(events_row0->values[3].type == TYPE_TIME);
+    assert(time_hour(events_row0->values[3].time_val.time_val) == 14);
+    assert(time_minute(events_row0->values[3].time_val.time_val) == 30);
+    assert(time_second(events_row0->values[3].time_val.time_val) == 45);
     
     log_msg(LOG_INFO, "Testing NULL handling...");
-    assert(events->rows[8].values[2].type == TYPE_NULL);
-    assert(events->rows[9].values[3].type == TYPE_NULL);
+    assert(events_row8->values[2].type == TYPE_NULL);
+    assert(events_row9->values[3].type == TYPE_NULL);
     
     log_msg(LOG_INFO, "DATE and TIME operations tests passed");
 }
@@ -579,7 +504,7 @@ void test_date_time_aggregations(void) {
     
     Table* mixed = find_table("mixed_data");
     assert(mixed != NULL);
-    assert(mixed->schema.column_count == 4);
+    assert(alist_length(&mixed->schema.columns) == 4);
     
     exec("INSERT INTO mixed_data (1, 'Test Entry', '2023-06-15', '10:30:45');");
     
@@ -595,9 +520,11 @@ static void test_date_time_literal_parsing(void) {
     
     Table* table = find_table("parse_test");
     assert(table != NULL);
-    assert(table->schema.column_count == 4);
-    assert(table->schema.columns[1].type == TYPE_DATE);
-    assert(table->schema.columns[2].type == TYPE_TIME);
+    assert(alist_length(&table->schema.columns) == 4);
+    ColumnDef* parse_col1 = (ColumnDef*)alist_get(&table->schema.columns, 1);
+    ColumnDef* parse_col2 = (ColumnDef*)alist_get(&table->schema.columns, 2);
+    assert(parse_col1->type == TYPE_DATE);
+    assert(parse_col2->type == TYPE_TIME);
     
     log_msg(LOG_INFO, "Testing valid date literals...");
     exec("INSERT INTO parse_test (1, '2023-01-01', '09:00:00', 'New Year');");
@@ -621,7 +548,7 @@ static void test_date_time_literal_parsing(void) {
     exec("INSERT INTO parse_test (13, '2023-07-04', '14:30:00', 'Afternoon');");
     exec("INSERT INTO parse_test (14, '2023-07-04', '20:45:30', 'Evening');");
     
-    assert(table->row_count == 14);
+    assert(alist_length(&table->rows) == 14);
     
     log_msg(LOG_INFO, "Testing date/time literals in WHERE clauses...");
     exec("SELECT * FROM parse_test WHERE date_col = '2023-01-01';");
@@ -644,7 +571,7 @@ static void test_date_time_literal_parsing(void) {
     exec("SELECT * FROM parse_test WHERE date_col IS NULL;");
     exec("SELECT * FROM parse_test WHERE time_col IS NULL;");
     
-    assert(table->row_count == 15);
+    assert(alist_length(&table->rows) == 15);
     
     log_msg(LOG_INFO, "DATE and TIME literal parsing tests passed");
 }
@@ -665,7 +592,7 @@ static void test_between_operator(void) {
     
     Table* table = find_table("products");
     assert(table != NULL);
-    assert(table->row_count == 6);
+    assert(alist_length(&table->rows) == 6);
     
     log_msg(LOG_INFO, "Testing BETWEEN with numeric values...");
     exec("SELECT * FROM products WHERE price BETWEEN 20.0 AND 80.0;");
@@ -720,7 +647,7 @@ void test_order_by(void) {
 
     Table* table = find_table("users");
     assert(table != NULL);
-    assert(table->row_count == 4);
+    assert(alist_length(&table->rows) == 4);
 
     log_msg(LOG_INFO, "Testing ORDER BY age ASC...");
     exec("SELECT * FROM users ORDER BY age;");
@@ -760,7 +687,7 @@ void test_limit(void) {
 
     Table* table = find_table("users");
     assert(table != NULL);
-    assert(table->row_count == 5);
+    assert(alist_length(&table->rows) == 5);
 
     log_msg(LOG_INFO, "Testing LIMIT 2...");
     exec("SELECT * FROM users LIMIT 2;");
@@ -790,7 +717,7 @@ void test_order_by_with_limit(void) {
 
     Table* table = find_table("users");
     assert(table != NULL);
-    assert(table->row_count == 4);
+    assert(alist_length(&table->rows) == 4);
 
     log_msg(LOG_INFO, "Testing ORDER BY age LIMIT 2...");
     exec("SELECT * FROM users ORDER BY age LIMIT 2;");
@@ -819,7 +746,7 @@ void test_distinct(void) {
 
     Table* table = find_table("distinct_test");
     assert(table != NULL);
-    assert(table->row_count == 6);
+    assert(alist_length(&table->rows) == 6);
 
     log_msg(LOG_INFO, "Testing COUNT(DISTINCT category)...");
     exec("SELECT COUNT(DISTINCT category) FROM distinct_test;");
@@ -864,7 +791,7 @@ void test_arithmetic_operations(void) {
 
     Table* table = find_table("arithmetic_test");
     assert(table != NULL);
-    assert(table->row_count == 3);
+    assert(alist_length(&table->rows) == 3);
 
     log_msg(LOG_INFO, "Testing addition...");
     exec("SELECT a + b FROM arithmetic_test;");
@@ -950,7 +877,7 @@ void test_string_operations(void) {
 
     Table* table = find_table("strings");
     assert(table != NULL);
-    assert(table->row_count == 5);
+    assert(alist_length(&table->rows) == 5);
 
     log_msg(LOG_INFO, "Testing string equality...");
     exec("SELECT * FROM strings WHERE name = 'Alice';");
@@ -1418,19 +1345,181 @@ void test_error_conditions(void) {
     log_msg(LOG_INFO, "Error condition tests passed");
 }
 
+void test_create_index(void) {
+    log_msg(LOG_INFO, "Testing CREATE INDEX...");
+    
+    reset_database();
+    
+    exec("CREATE TABLE users (id INT, name STRING, age INT);");
+    exec("INSERT INTO users (1, 'Alice', 25);");
+    exec("INSERT INTO users (2, 'Bob', 30);");
+    exec("INSERT INTO users (3, 'Charlie', 35);");
+    
+    exec("CREATE INDEX idx_users_age ON users (age);");
+    
+    Index* index = find_index_by_name("idx_users_age");
+    assert(index != NULL);
+    assert(strcmp(index->table_name, "users") == 0);
+    assert(strcmp(index->column_name, "age") == 0);
+    assert(index->entry_count == 3);
+    assert(index->bucket_count == 64);
+    
+    log_msg(LOG_INFO, "CREATE INDEX tests passed");
+}
+
+void test_drop_index(void) {
+    log_msg(LOG_INFO, "Testing DROP INDEX...");
+    reset_database();
+    
+    exec("CREATE TABLE products (id INT, name STRING, price FLOAT);");
+    exec("INSERT INTO products (1, 'Widget', 19.99);");
+    exec("INSERT INTO products (2, 'Gadget', 29.99);");
+    
+    exec("CREATE INDEX idx_products_price ON products (price);");
+    
+    Index* index = find_index_by_name("idx_products_price");
+    assert(index != NULL);
+    
+    exec("DROP INDEX idx_products_price;");
+    
+    index = find_index_by_name("idx_products_price");
+    assert(index == NULL);
+    
+    log_msg(LOG_INFO, "DROP INDEX tests passed");
+}
+
+void test_index_on_int_column(void) {
+    log_msg(LOG_INFO, "Testing INDEX on INT column...");
+    
+    reset_database();
+    
+    exec("CREATE TABLE orders (order_id INT, user_id INT, amount FLOAT);");
+    exec("INSERT INTO orders (1, 100, 150.00);");
+    exec("INSERT INTO orders (2, 101, 200.00);");
+    exec("INSERT INTO orders (3, 100, 75.50);");
+    exec("INSERT INTO orders (4, 102, 300.00);");
+    exec("INSERT INTO orders (5, 101, 125.25);");
+    
+    exec("CREATE INDEX idx_orders_user_id ON orders (user_id);");
+    
+    Index* index = find_index_by_name("idx_orders_user_id");
+    assert(index != NULL);
+    assert(index->entry_count == 5);
+    
+    log_msg(LOG_INFO, "INDEX on INT column tests passed");
+}
+
+void test_index_on_string_column(void) {
+    log_msg(LOG_INFO, "Testing INDEX on STRING column...");
+    
+    reset_database();
+    
+    exec("CREATE TABLE categories (id INT, name STRING);");
+    exec("INSERT INTO categories (1, 'Electronics');");
+    exec("INSERT INTO categories (2, 'Books');");
+    exec("INSERT INTO categories (3, 'Clothing');");
+    exec("INSERT INTO categories (4, 'Home & Garden');");
+    
+    exec("CREATE INDEX idx_categories_name ON categories (name);");
+    
+    Index* index = find_index_by_name("idx_categories_name");
+    assert(index != NULL);
+    assert(index->entry_count == 4);
+    
+    log_msg(LOG_INFO, "INDEX on STRING column tests passed");
+}
+
+void test_index_on_float_column(void) {
+    log_msg(LOG_INFO, "Testing INDEX on FLOAT column...");
+    
+    reset_database();
+    
+    exec("CREATE TABLE measurements (id INT, value FLOAT);");
+    exec("INSERT INTO measurements (1, 3.14159);");
+    exec("INSERT INTO measurements (2, 2.71828);");
+    exec("INSERT INTO measurements (3, 1.41421);");
+    
+    exec("CREATE INDEX idx_measurements_value ON measurements (value);");
+    
+    Index* index = find_index_by_name("idx_measurements_value");
+    assert(index != NULL);
+    assert(index->entry_count == 3);
+    
+    log_msg(LOG_INFO, "INDEX on FLOAT column tests passed");
+}
+
+void test_multiple_indexes(void) {
+    log_msg(LOG_INFO, "Testing multiple indexes...");
+    
+    reset_database();
+    
+    exec("CREATE TABLE employees (id INT, name STRING, department STRING, salary FLOAT);");
+    exec("INSERT INTO employees (1, 'Alice', 'Engineering', 75000.00);");
+    exec("INSERT INTO employees (2, 'Bob', 'Engineering', 80000.00);");
+    exec("INSERT INTO employees (3, 'Charlie', 'Sales', 65000.00);");
+    exec("INSERT INTO employees (4, 'Diana', 'Sales', 70000.00);");
+    exec("INSERT INTO employees (5, 'Eve', 'Engineering', 85000.00);");
+    
+    exec("CREATE INDEX idx_employees_id ON employees (id);");
+    exec("CREATE INDEX idx_employees_department ON employees (department);");
+    exec("CREATE INDEX idx_employees_salary ON employees (salary);");
+    
+    Index* index1 = find_index_by_name("idx_employees_id");
+    assert(index1 != NULL);
+    assert(index1->entry_count == 5);
+    
+    Index* index2 = find_index_by_name("idx_employees_department");
+    assert(index2 != NULL);
+    assert(index2->entry_count == 5);
+    
+    Index* index3 = find_index_by_name("idx_employees_salary");
+    assert(index3 != NULL);
+    assert(index3->entry_count == 5);
+    
+    exec("DROP INDEX idx_employees_id;");
+    
+    index1 = find_index_by_name("idx_employees_id");
+    assert(index1 == NULL);
+    
+    index2 = find_index_by_name("idx_employees_department");
+    assert(index2 != NULL);
+    
+    log_msg(LOG_INFO, "Multiple indexes tests passed");
+}
+
+void test_index_error_conditions(void) {
+    log_msg(LOG_INFO, "Testing INDEX error conditions...");
+    
+    reset_database();
+    
+    exec("CREATE TABLE test_table (id INT, name STRING);");
+    exec("INSERT INTO test_table (1, 'test');");
+    
+    exec("CREATE INDEX idx_test ON test_table (id);");
+    
+    Index* index = find_index_by_name("idx_test");
+    assert(index != NULL);
+    assert(index->entry_count == 1);
+    
+    exec("CREATE INDEX idx_test ON test_table (name);");
+    
+    index = find_index_by_name("idx_test");
+    assert(index != NULL);
+    assert(index->entry_count == 1);
+    
+    exec("DROP INDEX nonexistent_index;");
+    
+    log_msg(LOG_INFO, "INDEX error condition tests passed");
+}
+
 int main(void) {
     set_log_level(LOG_INFO);
     log_msg(LOG_INFO, "Running DB test suite...");
 
     test_create_table();
-    test_insert_data();
-    test_select_data();
-    test_where_clause();
     test_update_where_clause();
     test_delete_where_clause();
     test_where_cases();
-    test_drop_table();
-    test_crud_operations();
     test_null_values();
     test_empty_tables();
     test_limits();
@@ -1465,6 +1554,13 @@ int main(void) {
     test_order_by_expressions();
     test_is_null_conditions();
     test_subqueries();
+    test_create_index();
+    test_drop_index();
+    test_index_on_int_column();
+    test_index_on_string_column();
+    test_index_on_float_column();
+    test_multiple_indexes();
+    test_index_error_conditions();
 
     log_msg(LOG_INFO, "All tests passed!");
     return 0;

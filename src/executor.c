@@ -10,6 +10,17 @@
 #include "table.h"
 #include "values.h"
 
+static void free_row_contents(void* ptr) {
+    Row* row = (Row*)ptr;
+    if (!row) return;
+    for (int i = 0; i < row->value_count; i++) {
+        if (row->values[i].type == TYPE_STRING && row->values[i].char_val) {
+            free(row->values[i].char_val);
+        }
+    }
+    free(row->values);
+}
+
 static void print_centered(const char* str, int width) {
     int len = strlen(str);
     int padding = width - len;
@@ -131,32 +142,21 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
 
 /* Apply WHERE filter */
 static void exec_filter(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_filter: Filtering table: %s", current->filter.table_name);
+    log_msg(LOG_DEBUG, "exec_filter: Filtering table ID: %d", current->filter.table_id);
 
-    Table* table = get_table(current->filter.table_name);
+    Table* table = get_table_by_id(current->filter.table_id);
     if (!table) {
-        char suggestion[256];
-        const char* table_names[MAX_TABLES];
-
-        int length = alist_length(&tables);
-        for (int i = 0; i < length; i++) {
-            table_names[i] = ((Table*)alist_get(&tables, i))->name;
-        }
-        suggest_similar(current->filter.table_name, table_names, length, suggestion,
-                        sizeof(suggestion));
-        show_prominent_error("Table '%s' does not exist", current->filter.table_name);
-        if (strlen(suggestion) > 0) {
-            printf("  %s\n", suggestion);
-        }
+        log_msg(LOG_ERROR, "exec_filter: Table with ID %d does not exist", current->filter.table_id);
         return;
     }
 
     log_msg(LOG_INFO, "exec_filter: Displaying filtered table '%s'", table->name);
 
     int filtered_count = 0;
-    for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
-        Row* row = &table->rows[row_idx];
-        if (eval_expression(current->filter.filter_expr, row, &table->schema)) {
+    int row_count = alist_length(&table->rows);
+    for (int row_idx = 0; row_idx < row_count; row_idx++) {
+        Row* row = (Row*)alist_get(&table->rows, row_idx);
+        if (row && eval_expression(current->filter.filter_expr, row, &table->schema)) {
             filtered_count++;
         }
     }
@@ -165,39 +165,84 @@ static void exec_filter(const IRNode* current) {
 }
 
 static void exec_update_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_update_row: Updating rows in table: %s",
-            current->update_row.table_name);
+    log_msg(LOG_DEBUG, "exec_update_row: Updating rows in table ID: %d", current->update_row.table_id);
 
-    Table* table = get_table(current->update_row.table_name);
+    Table* table = get_table_by_id(current->update_row.table_id);
     if (!table) {
-        char suggestion[256];
-        const char* table_names[MAX_TABLES];
-
-        int length = alist_length(&tables);
-        for (int i = 0; i < length; i++) {
-            table_names[i] = ((Table*)alist_get(&tables, i))->name;
-        }
-        suggest_similar(current->update_row.table_name, table_names, length, suggestion,
-                        sizeof(suggestion));
-        show_prominent_error("Table '%s' does not exist", current->update_row.table_name);
-        if (strlen(suggestion) > 0) {
-            printf("  %s\n", suggestion);
-        }
+        log_msg(LOG_ERROR, "exec_update_row: Table with ID %d does not exist", current->update_row.table_id);
         return;
     }
 
     int updated_rows = 0;
-    for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
-        Row* row = &table->rows[row_idx];
+    int row_count = alist_length(&table->rows);
+    int value_count = alist_length(&current->update_row.values);
+    for (int row_idx = 0; row_idx < row_count; row_idx++) {
+        Row* row = (Row*)alist_get(&table->rows, row_idx);
+        if (!row) continue;
 
         if (!current->update_row.where_clause ||
             eval_expression(current->update_row.where_clause, row, &table->schema)) {
-            for (int i = 0; i < current->update_row.value_count; i++) {
-                for (int col_idx = 0; col_idx < table->schema.column_count; col_idx++) {
-                    if (strcmp(table->schema.columns[col_idx].name,
-                               current->update_row.values[i].column_name) == 0) {
-                        row->values[col_idx] = current->update_row.values[i].value;
-                        row->is_null[col_idx] = is_null(&current->update_row.values[i].value);
+            for (int i = 0; i < value_count; i++) {
+                ColumnValue* cv = (ColumnValue*)alist_get(&current->update_row.values, i);
+                if (!cv) continue;
+                int schema_col_count = alist_length(&table->schema.columns);
+                for (int col_idx = 0; col_idx < schema_col_count; col_idx++) {
+                    ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
+                    if (!col) continue;
+                    if (strcmp(col->name, cv->column_name) == 0) {
+                        DataType expected_type = col->type;
+                        Value source_val = cv->value;
+
+                        if (source_val.type != expected_type && source_val.type != TYPE_NULL) {
+                            Value converted;
+                            if (try_convert_value(&source_val, expected_type, &converted)) {
+                                if (row->values[col_idx].type == TYPE_STRING && row->values[col_idx].char_val) {
+                                    free(row->values[col_idx].char_val);
+                                }
+                                row->values[col_idx] = converted;
+                            } else {
+                                log_msg(LOG_ERROR,
+                                        "exec_update_row: Type mismatch for column '%s' (expected %s, got %s)",
+                                        col->name,
+                                        expected_type == TYPE_INT ? "INT" :
+                                        expected_type == TYPE_FLOAT ? "FLOAT" :
+                                        expected_type == TYPE_STRING ? "STRING" : "UNKNOWN",
+                                        source_val.type == TYPE_INT ? "INT" :
+                                        source_val.type == TYPE_FLOAT ? "FLOAT" :
+                                        source_val.type == TYPE_STRING ? "STRING" : "UNKNOWN");
+                                if (row->values[col_idx].type == TYPE_STRING && row->values[col_idx].char_val) {
+                                    free(row->values[col_idx].char_val);
+                                }
+                                row->values[col_idx] = VAL_NULL;
+                            }
+                        } else {
+                            if (row->values[col_idx].type == TYPE_STRING && row->values[col_idx].char_val) {
+                                free(row->values[col_idx].char_val);
+                            }
+                            row->values[col_idx] = copy_value(&source_val);
+                        }
+
+                        if (!check_not_null_constraint(table, col_idx, &row->values[col_idx])) {
+                            log_msg(LOG_ERROR, "exec_update_row: NOT NULL constraint violated for column '%s'",
+                                    col->name);
+                            return;
+                        }
+
+                        if (col->is_unique) {
+                            if (!check_unique_constraint(table, col_idx, &row->values[col_idx], row_idx)) {
+                                log_msg(LOG_ERROR, "exec_update_row: UNIQUE constraint violated for column '%s'",
+                                        col->name);
+                                return;
+                            }
+                        }
+
+                        if (col->is_foreign_key) {
+                            if (!check_foreign_key_constraint(table, col_idx, &row->values[col_idx])) {
+                                log_msg(LOG_ERROR, "exec_update_row: FOREIGN KEY constraint violated for column '%s'",
+                                        col->name);
+                                return;
+                            }
+                        }
                         break;
                     }
                 }
@@ -206,7 +251,7 @@ static void exec_update_row(const IRNode* current) {
         }
     }
     log_msg(LOG_INFO, "exec_update_row: Updated %d rows in table '%s'", updated_rows,
-            current->update_row.table_name);
+            table->name);
 }
 
 static void exec_aggregate(const IRNode* current) {
@@ -215,23 +260,12 @@ static void exec_aggregate(const IRNode* current) {
             : current->aggregate.func_type == FUNC_AVG   ? "AVG"
             : current->aggregate.func_type == FUNC_COUNT ? "COUNT"
             : current->aggregate.func_type == FUNC_MIN   ? "MIN"
-            : current->aggregate.func_type == FUNC_MAX   ? "MAX"
+            : current->aggregate.func_type == FUNC_MAX ? "MAX"
                                                          : "UNKNOWN");
 
-    Table* table = get_table(current->aggregate.table_name);
+    Table* table = get_table_by_id(current->aggregate.table_id);
     if (!table) {
-        char suggestion[256];
-        const char* table_names[MAX_TABLES];
-        int length = alist_length(&tables);
-        for (int i = 0; i < length; i++) {
-            table_names[i] = ((Table*)alist_get(&tables, i))->name;
-        }
-        suggest_similar(current->aggregate.table_name, table_names, length, suggestion,
-                        sizeof(suggestion));
-        show_prominent_error("Table '%s' does not exist", current->aggregate.table_name);
-        if (strlen(suggestion) > 0) {
-            printf("  %s\n", suggestion);
-        }
+        log_msg(LOG_ERROR, "exec_aggregate: Table with ID %d does not exist", current->aggregate.table_id);
         return;
     }
 
@@ -240,9 +274,10 @@ static void exec_aggregate(const IRNode* current) {
         state.is_distinct = true;
     }
 
+    int table_row_count = alist_length(&table->rows);
     if (current->aggregate.func_type == FUNC_COUNT && current->aggregate.count_all) {
         log_msg(LOG_DEBUG, "exec_aggregate: COUNT(*) detected, using row_count");
-        state.count = table->row_count;
+        state.count = table_row_count;
     } else {
         log_msg(LOG_DEBUG, "exec_aggregate: %s with operand, count_all=%d",
                 (current->aggregate.func_type == FUNC_COUNT ? "COUNT"
@@ -252,26 +287,20 @@ static void exec_aggregate(const IRNode* current) {
                  : current->aggregate.func_type == FUNC_MAX ? "MAX"
                                                             : "UNKNOWN"),
                 current->aggregate.count_all);
-        for (int row_idx = 0; row_idx < table->row_count; row_idx++) {
+        for (int row_idx = 0; row_idx < table_row_count; row_idx++) {
+            Row* row = (Row*)alist_get(&table->rows, row_idx);
+            if (!row) continue;
             Value val = VAL_NULL;
             if (current->aggregate.operand->type == EXPR_COLUMN) {
-                val = get_column_value(&table->rows[row_idx], &table->schema,
+                val = get_column_value(row, &table->schema,
                                        current->aggregate.operand->column_name);
             } else if (current->aggregate.operand->type == EXPR_VALUE) {
                 val = current->aggregate.operand->value;
             } else {
-                val = eval_select_expression(current->aggregate.operand, &table->rows[row_idx],
+                val = eval_select_expression(current->aggregate.operand, row,
                                              &table->schema);
             }
             update_aggregate_state(&state, &val, &current->aggregate);
-            if (current->aggregate.distinct && !is_null(&val)) {
-                for (int i = 0; i < state.distinct_count - 1; i++) {
-                    if (state.seen_values[i]) {
-                        free(state.seen_values[i]);
-                        state.seen_values[i] = NULL;
-                    }
-                }
-            }
         }
     }
 
@@ -289,24 +318,28 @@ static void exec_aggregate(const IRNode* current) {
         printf("\n");
     }
     if (current->aggregate.distinct) {
-        for (int i = 0; i < MAX_ROWS; i++) {
-            if (state.seen_values[i]) {
-                free(state.seen_values[i]);
+        int seen_count = alist_length(&state.seen_values);
+        for (int i = 0; i < seen_count; i++) {
+            Value* seen = (Value*)alist_get(&state.seen_values, i);
+            if (seen) {
+                free(seen);
             }
         }
     }
 }
 
 static void exec_project(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_project: Projecting expressions for table: %s",
-            current->project.table_name);
+    log_msg(LOG_DEBUG, "exec_project: Projecting expressions for table ID: %d",
+            current->project.table_id);
 
-    Table* table = get_table(current->project.table_name);
+    Table* table = get_table_by_id(current->project.table_id);
     if (!table) {
+        log_msg(LOG_ERROR, "exec_project: Table with ID %d does not exist", current->project.table_id);
         return;
     }
 
-    int display_limit = table->row_count;
+    int table_row_count = alist_length(&table->rows);
+    int display_limit = table_row_count;
     if (current->project.limit > 0 && current->project.limit < display_limit) {
         display_limit = current->project.limit;
     }
@@ -314,14 +347,18 @@ static void exec_project(const IRNode* current) {
     print_project_header(current, &table->schema);
 
     for (int row_idx = 0; row_idx < display_limit; row_idx++) {
-        print_project_row(current, &table->rows[row_idx], &table->schema);
+        Row* row = (Row*)alist_get(&table->rows, row_idx);
+        if (row) {
+            print_project_row(current, row, &table->schema);
+        }
     }
 
-    int column_count = current->project.expression_count;
+    int column_count = alist_length(&current->project.expressions);
 
-    if (column_count == 1 && current->project.expressions[0]->type == EXPR_VALUE &&
-        strcmp(current->project.expressions[0]->value.char_val, "*") == 0) {
-        column_count = table->schema.column_count;
+    Expr** first_expr = (Expr**)alist_get(&current->project.expressions, 0);
+    if (column_count == 1 && first_expr && first_expr[0]->type == EXPR_VALUE &&
+        strcmp(first_expr[0]->value.char_val, "*") == 0) {
+        column_count = alist_length(&table->schema.columns);
     }
 
     printf("└");
@@ -364,9 +401,12 @@ static double value_to_double(const Value* arg) {
 }
 
 static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name) {
-    for (int i = 0; i < schema->column_count; i++) {
-        if (strcmp(schema->columns[i].name, column_name) == 0) {
-            if (row->is_null[i]) {
+    int column_count = alist_length(&schema->columns);
+    for (int i = 0; i < column_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&schema->columns, i);
+        if (!col) continue;
+        if (strcmp(col->name, column_name) == 0) {
+            if (row->values[i].type == TYPE_NULL) {
                 return VAL_NULL;
             } else {
                 return row->values[i];
@@ -378,11 +418,12 @@ static Value get_column_value(const Row* row, const TableDef* schema, const char
 }
 
 static void print_project_header(const IRNode* current, const TableDef* schema) {
-    int column_count = current->project.expression_count;
+    int column_count = alist_length(&current->project.expressions);
 
-    if (column_count == 1 && current->project.expressions[0]->type == EXPR_VALUE &&
-        strcmp(current->project.expressions[0]->value.char_val, "*") == 0) {
-        column_count = schema->column_count;
+    Expr** first_expr = (Expr**)alist_get(&current->project.expressions, 0);
+    if (column_count == 1 && first_expr && first_expr[0]->type == EXPR_VALUE &&
+        strcmp(first_expr[0]->value.char_val, "*") == 0) {
+        column_count = alist_length(&schema->columns);
     }
 
     printf("┌");
@@ -397,30 +438,36 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
     printf("┐\n");
 
     printf("│");
-    for (int i = 0; i < current->project.expression_count; i++) {
-        if (current->project.expressions[i]->type == EXPR_COLUMN) {
-            print_centered(current->project.expressions[i]->column_name, 20);
-        } else if (current->project.expressions[i]->type == EXPR_AGGREGATE_FUNC) {
+    int expr_count = alist_length(&current->project.expressions);
+    for (int i = 0; i < expr_count; i++) {
+        Expr** expr = (Expr**)alist_get(&current->project.expressions, i);
+        if (expr[0]->type == EXPR_COLUMN) {
+            print_centered(expr[0]->column_name, 20);
+        } else if (expr[0]->type == EXPR_AGGREGATE_FUNC) {
             print_centered(
-                current->project.expressions[i]->aggregate.func_type == FUNC_COUNT ? "COUNT"
-                : current->project.expressions[i]->aggregate.func_type == FUNC_SUM ? "SUM"
-                : current->project.expressions[i]->aggregate.func_type == FUNC_AVG ? "AVG"
-                : current->project.expressions[i]->aggregate.func_type == FUNC_MIN ? "MIN"
-                : current->project.expressions[i]->aggregate.func_type == FUNC_MAX ? "MAX"
-                                                                                   : "UNKNOWN",
+                expr[0]->aggregate.func_type == FUNC_COUNT ? "COUNT"
+                : expr[0]->aggregate.func_type == FUNC_SUM ? "SUM"
+                : expr[0]->aggregate.func_type == FUNC_AVG ? "AVG"
+                : expr[0]->aggregate.func_type == FUNC_MIN ? "MIN"
+                : expr[0]->aggregate.func_type == FUNC_MAX ? "MAX"
+                                                           : "UNKNOWN",
                 20);
-        } else if (current->project.expressions[i]->type == EXPR_VALUE &&
-                   strcmp(current->project.expressions[i]->value.char_val, "*") == 0) {
-            for (int j = 0; j < schema->column_count; j++) {
-                print_centered(schema->columns[j].name, 20);
+        } else if (expr[0]->type == EXPR_VALUE &&
+                   strcmp(expr[0]->value.char_val, "*") == 0) {
+            int schema_col_count = alist_length(&schema->columns);
+            for (int j = 0; j < schema_col_count; j++) {
+                ColumnDef* col = (ColumnDef*)alist_get(&schema->columns, j);
+                if (col) {
+                    print_centered(col->name, 20);
+                }
                 printf("│");
             }
             break;
         } else {
             print_centered("expression", 20);
         }
-        if (!(current->project.expressions[i]->type == EXPR_VALUE &&
-              strcmp(current->project.expressions[i]->value.char_val, "*") == 0 && i == 0)) {
+        if (!(expr[0]->type == EXPR_VALUE &&
+              strcmp(expr[0]->value.char_val, "*") == 0 && i == 0)) {
             printf("│");
         }
     }
@@ -440,11 +487,14 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
 
 static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema) {
     printf("│");
-    for (int col_idx = 0; col_idx < current->project.expression_count; col_idx++) {
-        if (current->project.expressions[col_idx]->type == EXPR_VALUE &&
-            strcmp(current->project.expressions[col_idx]->value.char_val, "*") == 0) {
-            for (int j = 0; j < schema->column_count; j++) {
-                if (row->is_null[j]) {
+    int expr_count = alist_length(&current->project.expressions);
+    for (int col_idx = 0; col_idx < expr_count; col_idx++) {
+        Expr** expr = (Expr**)alist_get(&current->project.expressions, col_idx);
+        if (expr[0]->type == EXPR_VALUE &&
+            strcmp(expr[0]->value.char_val, "*") == 0) {
+            int schema_col_count = alist_length(&schema->columns);
+            for (int j = 0; j < schema_col_count; j++) {
+                if (row->values[j].type == TYPE_NULL) {
                     print_centered("NULL", 20);
                 } else {
                     print_centered(repr(&row->values[j]), 20);
@@ -452,19 +502,18 @@ static void print_project_row(const IRNode* current, const Row* row, const Table
                 printf("│");
             }
             break;
-        } else if (current->project.expressions[col_idx]->type == EXPR_AGGREGATE_FUNC) {
-            // Skip aggregate functions
+        } else if (expr[0]->type == EXPR_AGGREGATE_FUNC) {
             print_centered("", 20);
         } else {
-            Value val = eval_select_expression(current->project.expressions[col_idx], row, schema);
+            Value val = eval_select_expression(expr[0], row, schema);
             if (is_null(&val)) {
                 print_centered("NULL", 20);
             } else {
                 print_centered(repr(&val), 20);
             }
         }
-        if (!(current->project.expressions[col_idx]->type == EXPR_VALUE &&
-              strcmp(current->project.expressions[col_idx]->value.char_val, "*") == 0 &&
+        if (!(expr[0]->type == EXPR_VALUE &&
+              strcmp(expr[0]->value.char_val, "*") == 0 &&
               col_idx == 0)) {
             printf("│");
         }
@@ -474,10 +523,11 @@ static void print_project_row(const IRNode* current, const Row* row, const Table
 
 /* Returns <0 if a<b, 0 if equal, >0 if a>b */
 static int compare_rows_for_sort(const Row* a, const Row* b, const TableDef* schema,
-                                 Expr* const* order_by, int order_by_count) {
+                                 const ArrayList* order_by, int order_by_count) {
     for (int i = 0; i < order_by_count; i++) {
-        if (order_by[i]->type == EXPR_COLUMN) {
-            const char* col_name = order_by[i]->column_name;
+        Expr** expr = (Expr**)alist_get(order_by, i);
+        if (expr[0]->type == EXPR_COLUMN) {
+            const char* col_name = expr[0]->column_name;
             Value val_a = get_column_value(a, schema, col_name);
             Value val_b = get_column_value(b, schema, col_name);
 
@@ -500,34 +550,37 @@ static int compare_rows_for_sort(const Row* a, const Row* b, const TableDef* sch
 
 /* Bubble sort ORDER BY columns (asc/desc) */
 static void exec_sort(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_sort: Sorting table: %s by %d columns", current->sort.table_name,
-            current->sort.order_by_count);
+    int order_by_count = alist_length(&current->sort.order_by);
+    log_msg(LOG_DEBUG, "exec_sort: Sorting table ID: %d by %d columns", current->sort.table_id,
+            order_by_count);
 
-    Table* table = get_table(current->sort.table_name);
+    Table* table = get_table_by_id(current->sort.table_id);
     if (!table) {
+        log_msg(LOG_ERROR, "exec_sort: Table with ID %d does not exist", current->sort.table_id);
         return;
     }
 
-    for (int i = 0; i < table->row_count - 1; i++) {
-        for (int j = 0; j < table->row_count - i - 1; j++) {
-            int cmp = compare_rows_for_sort(&table->rows[j], &table->rows[j + 1], &table->schema,
-                                            current->sort.order_by, current->sort.order_by_count);
+    int row_count = alist_length(&table->rows);
+    for (int i = 0; i < row_count - 1; i++) {
+        for (int j = 0; j < row_count - i - 1; j++) {
+            Row* row_j = (Row*)alist_get(&table->rows, j);
+            Row* row_j1 = (Row*)alist_get(&table->rows, j + 1);
+            if (!row_j || !row_j1) continue;
+            int cmp = compare_rows_for_sort(row_j, row_j1, &table->schema,
+                                            &current->sort.order_by, order_by_count);
             bool swap_needed = false;
             if (cmp != 0) {
-                if (current->sort.order_by_desc[0]) {
+                if (*(bool*)alist_get(&current->sort.order_by_desc, 0)) {
                     swap_needed = cmp < 0;
                 } else {
                     swap_needed = cmp > 0;
                 }
             }
             if (swap_needed) {
-                Row* temp = create_row(table->schema.column_count);
-                if (!temp) continue;
-                copy_row(temp, &table->rows[j], table->schema.column_count);
-                copy_row(&table->rows[j], &table->rows[j + 1], table->schema.column_count);
-                copy_row(&table->rows[j + 1], temp, table->schema.column_count);
-                /* Clean up */
-                free_row(temp);
+                Row temp;
+                memcpy(&temp, row_j, sizeof(Row));
+                memcpy(row_j, row_j1, sizeof(Row));
+                memcpy(row_j1, &temp, sizeof(Row));
             }
         }
     }
@@ -832,7 +885,7 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
         if (expr->scalar.arg_count == 3) {
             Value length_arg = eval_select_expression(expr->scalar.args[2], row, schema);
             if (is_null(&length_arg)) return VAL_NULL;
-            int requested_len = atoi(length_arg.char_val);
+            int requested_len = (int)value_to_double(&length_arg);
             if (requested_len < max_len) max_len = requested_len;
         }
 
@@ -914,8 +967,19 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
                 return VAL_NULL;
             }
 
-            if (strlen(result.char_val) + strlen(arg.char_val) < MAX_STRING_LEN - 1) {
-                strcat(result.char_val, arg.char_val);
+            char str_buf[64];
+            if (arg.type == TYPE_STRING) {
+                snprintf(str_buf, sizeof(str_buf), "%s", arg.char_val);
+            } else if (arg.type == TYPE_INT) {
+                snprintf(str_buf, sizeof(str_buf), "%d", arg.int_val);
+            } else if (arg.type == TYPE_FLOAT) {
+                snprintf(str_buf, sizeof(str_buf), "%.2f", arg.float_val);
+            } else {
+                continue;
+            }
+
+            if (strlen(result.char_val) + strlen(str_buf) < MAX_STRING_LEN - 1) {
+                strcat(result.char_val, str_buf);
             }
         }
         result.type = TYPE_STRING;
@@ -941,47 +1005,45 @@ static Value eval_scalar_function(const Expr* expr, const Row* row, const TableD
 }
 
 static void exec_delete_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_delete_row: Deleting rows from table: %s",
-            current->delete_row.table_name);
+    log_msg(LOG_DEBUG, "exec_delete_row: Deleting rows from table ID: %d",
+            current->delete_row.table_id);
 
-    Table* table = get_table(current->delete_row.table_name);
+    Table* table = get_table_by_id(current->delete_row.table_id);
     if (!table) {
-        char suggestion[256];
-        const char* table_names[MAX_TABLES];
-        int length = alist_length(&tables);
-        for (int i = 0; i < length; i++) {
-            table_names[i] = ((Table*)alist_get(&tables, i))->name;
-        }
-        suggest_similar(current->delete_row.table_name, table_names, length, suggestion,
-                        sizeof(suggestion));
-        show_prominent_error("Table '%s' does not exist", current->delete_row.table_name);
-        if (strlen(suggestion) > 0) {
-            printf("  %s\n", suggestion);
-        }
+        log_msg(LOG_ERROR, "exec_delete_row: Table with ID %d does not exist", current->delete_row.table_id);
         return;
     }
 
     int deleted_rows = 0;
-    int write_idx = 0;
+    ArrayList kept_rows;
+    alist_init(&kept_rows, sizeof(Row), free_row_contents);
 
-    for (int read_idx = 0; read_idx < table->row_count; read_idx++) {
-        Row* row = &table->rows[read_idx];
+    int row_count = alist_length(&table->rows);
+    for (int read_idx = 0; read_idx < row_count; read_idx++) {
+        Row* row = (Row*)alist_get(&table->rows, read_idx);
+        if (!row) continue;
 
         if (!current->delete_row.where_clause ||
             !eval_expression(current->delete_row.where_clause, row, &table->schema)) {
-            if (read_idx != write_idx) {
-                table->rows[write_idx] = table->rows[read_idx];
+            Row* kept = (Row*)alist_append(&kept_rows);
+            if (kept) {
+                kept->value_capacity = row->value_count > 0 ? row->value_count : 4;
+                kept->values = malloc(kept->value_capacity * sizeof(Value));
+                kept->value_count = 0;
+                if (kept->values) {
+                    copy_row(kept, row, 0);
+                }
             }
-            write_idx++;
         } else {
             deleted_rows++;
         }
     }
 
-    table->row_count = write_idx;
+    alist_destroy(&table->rows);
+    table->rows = kept_rows;
 
     log_msg(LOG_INFO, "exec_delete_row: Deleted %d rows from table '%s'", deleted_rows,
-            current->delete_row.table_name);
+            table->name);
 }
 
 void exec_ir(IRNode* ir) {
@@ -1031,6 +1093,14 @@ void exec_ir(IRNode* ir) {
                 exec_project(current);
                 break;
 
+            case IR_CREATE_INDEX:
+                exec_create_index(current);
+                break;
+
+            case IR_DROP_INDEX:
+                exec_drop_index(current);
+                break;
+
             case IR_SORT:
                 exec_sort(current);
                 break;
@@ -1044,4 +1114,119 @@ void exec_ir(IRNode* ir) {
     }
 
     log_msg(LOG_DEBUG, "exec_ir: IR execution completed");
+}
+
+static QueryResult* g_last_result = NULL;
+
+void free_query_result(QueryResult* result) {
+    if (!result) return;
+    if (result->values) {
+        for (int i = 0; i < result->row_count * result->col_count; i++) {
+            if (result->values[i].type == TYPE_STRING && result->values[i].char_val) {
+                free(result->values[i].char_val);
+            }
+        }
+        free(result->values);
+    }
+    if (result->rows) free(result->rows);
+    if (result->column_names) {
+        for (int i = 0; i < result->col_count; i++) {
+            if (result->column_names[i]) free(result->column_names[i]);
+        }
+        free(result->column_names);
+    }
+    free(result);
+}
+
+static void capture_project_result(const IRNode* current) {
+    free_query_result(g_last_result);
+    g_last_result = NULL;
+
+    Table* table = get_table_by_id(current->project.table_id);
+    if (!table) {
+        log_msg(LOG_ERROR, "capture_project_result: Table with ID %d does not exist", current->project.table_id);
+        return;
+    }
+
+    g_last_result = malloc(sizeof(QueryResult));
+    if (!g_last_result) return;
+
+    memset(g_last_result, 0, sizeof(QueryResult));
+    g_last_result->col_count = alist_length(&current->project.expressions);
+    g_last_result->column_names = malloc(g_last_result->col_count * sizeof(char*));
+    for (int i = 0; i < g_last_result->col_count; i++) {
+        Expr** expr = (Expr**)alist_get(&current->project.expressions, i);
+        const char* alias = expr[0]->alias;
+        g_last_result->column_names[i] = malloc(strlen(alias) + 1);
+        strcpy(g_last_result->column_names[i], alias);
+        if (!g_last_result->column_names[i][0]) {
+            free(g_last_result->column_names[i]);
+            g_last_result->column_names[i] = malloc(5);
+            strcpy(g_last_result->column_names[i], "expr");
+        }
+    }
+
+    int capacity = 16;
+    g_last_result->values = malloc(capacity * sizeof(Value));
+    g_last_result->rows = malloc(capacity * sizeof(int));
+    g_last_result->row_count = 0;
+
+    int table_row_count = alist_length(&table->rows);
+    for (int i = 0; i < table_row_count; i++) {
+        Row* row = (Row*)alist_get(&table->rows, i);
+        if (!row || row->value_count == 0) continue;
+
+        for (int j = 0; j < g_last_result->col_count; j++) {
+            if (g_last_result->row_count * g_last_result->col_count + j >= capacity) {
+                capacity *= 2;
+                g_last_result->values = realloc(g_last_result->values, capacity * sizeof(Value));
+                g_last_result->rows = realloc(g_last_result->rows, capacity * sizeof(int));
+            }
+            Expr** expr = (Expr**)alist_get(&current->project.expressions, j);
+            Value val = eval_select_expression(expr[0], row, &table->schema);
+            g_last_result->values[g_last_result->row_count * g_last_result->col_count + j] = val;
+        }
+        g_last_result->rows[g_last_result->row_count] = i;
+        g_last_result->row_count++;
+    }
+}
+
+void clear_query_result(void) {
+    free_query_result(g_last_result);
+    g_last_result = NULL;
+}
+
+QueryResult* exec_query(const char* sql) {
+    Token* tokens = tokenize(sql);
+    ASTNode* ast = parse(tokens);
+    if (!ast) {
+        free_tokens(tokens);
+        return NULL;
+    }
+
+    IRNode* ir = ast_to_ir(ast);
+    if (!ir) {
+        free_tokens(tokens);
+        free_ast(ast);
+        return NULL;
+    }
+
+    for (IRNode* current = ir; current != NULL; current = current->next) {
+        switch (current->type) {
+            case IR_PROJECT:
+                capture_project_result(current);
+                break;
+            default:
+                break;
+        }
+    }
+
+    exec_ir(ir);
+    free_ir(ir);
+    free_tokens(tokens);
+    free_ast(ast);
+
+    QueryResult* result = g_last_result;
+    g_last_result = NULL;
+    return result;
 }

@@ -11,5 +11,7 @@ const char* repr(const Value* val);
 bool eval_comparison(Value left, Value right, OperatorType op);
 void update_aggregate_state(AggState* state, const Value* val, const IRAggregate* agg);
 Value compute_aggregate(AggFuncType func_type, AggState* state, DataType return_type);
+Value convert_value(const Value* val, DataType target_type);
+bool try_convert_value(const Value* val, DataType target_type, Value* out_result);
 
 #endif

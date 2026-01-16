@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "arraylist.h"
+
 #define MAX_TABLES 32
 #define MAX_TOKEN_LEN 256
 #define MAX_TABLE_NAME_LEN 64
@@ -45,7 +47,12 @@ typedef enum {
   TOKEN_BY,
   TOKEN_AS,
   TOKEN_EXISTS,
-  TOKEN_IN
+  TOKEN_IN,
+  TOKEN_PRIMARY,
+  TOKEN_KEY,
+  TOKEN_REFERENCES,
+  TOKEN_NULL,
+  TOKEN_UNIQUE
 } TokenType;
 
 typedef struct {
@@ -64,27 +71,27 @@ typedef enum {
 } DataType;
 
 typedef struct {
-  int hour;
-  int minute;
-  int second;
+  unsigned int time_val;
 } TimeValue;
 
 typedef struct {
-  int year;
-  int month;
-  int day;
+  unsigned int date_val;
 } DateValue;
 
 typedef struct {
   char name[MAX_COLUMN_NAME_LEN];
+  char references_table[MAX_TABLE_NAME_LEN];
+  char references_column[MAX_COLUMN_NAME_LEN];
   DataType type;
   bool nullable;
+  bool is_primary_key;
+  bool is_unique;
+  bool is_foreign_key;
 } ColumnDef;
 
 typedef struct {
   char name[MAX_TABLE_NAME_LEN];
-  ColumnDef columns[MAX_COLUMNS];
-  int column_count;
+  ArrayList columns;
 } TableDef;
 
 typedef enum {
@@ -126,7 +133,9 @@ typedef enum {
   AST_SELECT,
   AST_DROP_TABLE,
   AST_UPDATE_ROW,
-  AST_DELETE_ROW
+  AST_DELETE_ROW,
+  AST_CREATE_INDEX,
+  AST_DROP_INDEX
 } ASTType;
 
 typedef struct {
@@ -195,7 +204,7 @@ typedef enum {
   FUNC_CONCAT
 } ScalarFuncType;
 
-typedef struct ASTNode ASTNode;
+struct ASTNode;
 
 typedef struct Expr {
   ExprType type;
@@ -224,45 +233,54 @@ typedef struct Expr {
       int arg_count;
     } scalar;
     struct {
-      ASTNode *subquery;
+      struct ASTNode *subquery;
     } subquery;
   };
 } Expr;
 
 typedef struct {
-  TableDef table_def;
+  char table_name[MAX_TABLE_NAME_LEN];
+  ArrayList columns;
 } CreateTableNode;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  ColumnValue values[MAX_COLUMNS];
-  int value_count;
+  int table_id;
+  ArrayList values;
 } InsertNode;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  Expr *expressions[MAX_COLUMNS];
-  int expression_count;
+  int table_id;
+  ArrayList expressions;
   Expr *where_clause;
-  Expr *order_by[MAX_COLUMNS];
-  bool order_by_desc[MAX_COLUMNS];
+  ArrayList order_by;
+  ArrayList order_by_desc;
   int order_by_count;
   int limit;
 } SelectNode;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
+  int table_id;
 } DropTableNode;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  ColumnValue values[MAX_COLUMNS];
-  int value_count;
+  int table_id;
+  char column_name[MAX_COLUMN_NAME_LEN];
+  char index_name[MAX_TABLE_NAME_LEN];
+} CreateIndexNode;
+
+typedef struct {
+  int table_id;
+  char index_name[MAX_TABLE_NAME_LEN];
+} DropIndexNode;
+
+typedef struct {
+  int table_id;
+  ArrayList values;
   Expr *where_clause;
 } UpdateNode;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
+  int table_id;
   Expr *where_clause;
 } DeleteNode;
 
@@ -275,6 +293,8 @@ typedef struct ASTNode {
     DropTableNode drop_table;
     UpdateNode update;
     DeleteNode delete;
+    CreateIndexNode create_index;
+    DropIndexNode drop_index;
   };
   struct ASTNode *next;
 } ASTNode;
@@ -289,46 +309,47 @@ typedef enum {
   IR_FILTER,
   IR_AGGREGATE,
   IR_PROJECT,
-  IR_SORT
+  IR_SORT,
+  IR_CREATE_INDEX,
+  IR_DROP_INDEX
 } IRType;
 
 typedef struct {
-  TableDef table_def;
+  char table_name[MAX_TABLE_NAME_LEN];
+  ArrayList columns;
 } IRCreateTable;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  Value values[MAX_COLUMNS];
-  int value_count;
+  int table_id;
+  ArrayList values;
 } IRInsertRow;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
+  int table_id;
 } IRScanTable;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
+  int table_id;
 } IRDropTable;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  ColumnValue values[MAX_COLUMNS];
-  int value_count;
+  int table_id;
+  ArrayList values;
   Expr *where_clause;
 } IRUpdateRow;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
+  int table_id;
   Expr *where_clause;
 } IRDeleteRow;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
+  int table_id;
   Expr *filter_expr;
 } IRFilter;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
+  int table_id;
   AggFuncType func_type;
   Expr *operand;
   bool distinct;
@@ -336,18 +357,27 @@ typedef struct {
 } IRAggregate;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  Expr *expressions[MAX_COLUMNS];
-  int expression_count;
+  int table_id;
+  ArrayList expressions;
   int limit;
 } IRProject;
 
 typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  Expr *order_by[MAX_COLUMNS];
-  bool order_by_desc[MAX_COLUMNS];
-  int order_by_count;
+  int table_id;
+  ArrayList order_by;
+  ArrayList order_by_desc;
 } IRSort;
+
+typedef struct {
+  int table_id;
+  char column_name[MAX_COLUMN_NAME_LEN];
+  char index_name[MAX_TABLE_NAME_LEN];
+} IRCreateIndex;
+
+typedef struct {
+  int table_id;
+  char index_name[MAX_TABLE_NAME_LEN];
+} IRDropIndex;
 
 typedef struct IRNode {
   IRType type;
@@ -362,24 +392,39 @@ typedef struct IRNode {
     IRAggregate aggregate;
     IRProject project;
     IRSort sort;
+    IRCreateIndex create_index;
+    IRDropIndex drop_index;
   };
   struct IRNode *next;
 } IRNode;
 
-typedef struct {
-  Value* values;
-  bool* is_null;
+typedef struct Row {
+  Value *values;
   int value_count;
   int value_capacity;
 } Row;
 
 typedef struct {
   char name[MAX_TABLE_NAME_LEN];
+  int table_id;
   TableDef schema;
-  Row* rows;
-  int row_count;
-  int row_capacity;
+  ArrayList rows;
 } Table;
+
+typedef struct IndexEntry {
+  Value key;
+  int row_index;
+  struct IndexEntry *next;
+} IndexEntry;
+
+typedef struct {
+  char index_name[MAX_TABLE_NAME_LEN];
+  char table_name[MAX_TABLE_NAME_LEN];
+  char column_name[MAX_COLUMN_NAME_LEN];
+  IndexEntry **buckets;
+  int bucket_count;
+  int entry_count;
+} Index;
 
 typedef struct {
   double sum;
@@ -388,9 +433,16 @@ typedef struct {
   Value max_val;
   bool has_min, has_max;
   bool is_distinct;
-  char *seen_values[MAX_ROWS];
+  ArrayList seen_values;
   int distinct_count;
 } AggState;
+
+int time_hour(unsigned int time_val);
+int time_minute(unsigned int time_val);
+int time_second(unsigned int time_val);
+int date_year(unsigned int date_val);
+int date_month(unsigned int date_val);
+int date_day(unsigned int date_val);
 
 Token *tokenize(const char *input);
 
@@ -411,5 +463,25 @@ void exec_ir(IRNode *ir);
 void free_tokens(Token *tokens);
 void free_ast(ASTNode *ast);
 void free_ir(IRNode *ir);
+
+void exec_create_index(const IRNode *current);
+void exec_drop_index(const IRNode *current);
+void index_table_column(const char *table_name, const char *column_name,
+                        const char *index_name);
+void drop_index_by_name(const char *index_name);
+Index *find_index(const char *index_name);
+int hash_value(const Value *value, int bucket_count);
+void clear_query_result(void);
+
+typedef struct {
+  Value *values;
+  int *rows;
+  int row_count;
+  int col_count;
+  char **column_names;
+} QueryResult;
+
+QueryResult *exec_query(const char *sql);
+void free_query_result(QueryResult *result);
 
 #endif

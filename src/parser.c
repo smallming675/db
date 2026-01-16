@@ -6,6 +6,10 @@
 
 #include "db.h"
 #include "logger.h"
+#include "table.h"
+
+static unsigned int make_time(int hour, int minute, int second) { return ((hour & 0xFF) << 12) | ((minute & 0x3F) << 6) | (second & 0x3F); }
+static unsigned int make_date(int year, int month, int day) { return ((year & 0x3FFFFF) << 9) | ((month & 0xF) << 5) | (day & 0x1F); }
 
 #define COLOR_RESET "\x1b[0m"
 #define COLOR_RED "\x1b[31m"
@@ -32,15 +36,55 @@ static Expr* parse_and_expr(ParseContext* ctx);
 static Expr* parse_or_expr(ParseContext* ctx);
 static Expr* parse_where_clause(ParseContext* ctx);
 static Expr* parse_aggregate_func(ParseContext* ctx);
+static Expr* parse_scalar_func(ParseContext* ctx);
 static bool match(TokenType type);
 static bool consume(ParseContext* ctx, TokenType type);
 static bool expect(ParseContext* ctx, TokenType type, const char* context);
+
 static DataType parse_data_type(ParseContext* ctx);
 static bool parse_column_def(ParseContext* ctx, ColumnDef* col);
 static Value parse_value(ParseContext* ctx);
 static ASTNode* parse_update(ParseContext* ctx);
 static ASTNode* parse_delete(ParseContext* ctx);
 static ASTNode* parse_select(ParseContext* ctx);
+static ASTNode* parse_create_index(ParseContext* ctx);
+static ASTNode* parse_drop_index(ParseContext* ctx);
+
+static void free_column_value(void* ptr) {
+    ColumnValue* cv = (ColumnValue*)ptr;
+    if (!cv) return;
+    if (cv->value.type == TYPE_STRING && cv->value.char_val) {
+        free(cv->value.char_val);
+        cv->value.char_val = NULL;
+    }
+    cv->value.type = TYPE_NULL;
+}
+
+static void free_expr_contents(Expr* expr) {
+    if (!expr) return;
+    switch (expr->type) {
+        case EXPR_BINARY_OP:
+            if (expr->binary.left) free_expr_contents(expr->binary.left);
+            if (expr->binary.right) free_expr_contents(expr->binary.right);
+            break;
+        case EXPR_UNARY_OP:
+            if (expr->unary.operand) free_expr_contents(expr->unary.operand);
+            break;
+        case EXPR_AGGREGATE_FUNC:
+            if (expr->aggregate.operand) free_expr_contents(expr->aggregate.operand);
+            break;
+        case EXPR_SCALAR_FUNC:
+            for (int i = 0; i < expr->scalar.arg_count; i++) {
+                if (expr->scalar.args[i]) free_expr_contents(expr->scalar.args[i]);
+            }
+            break;
+        case EXPR_SUBQUERY:
+            if (expr->subquery.subquery) free_ast(expr->subquery.subquery);
+            break;
+        default:
+            break;
+    }
+}
 
 const char* token_type_name(TokenType type) {
     switch (type) {
@@ -102,6 +146,20 @@ const char* token_type_name(TokenType type) {
             return "BY";
         case TOKEN_AS:
             return "AS";
+        case TOKEN_EXISTS:
+            return "EXISTS";
+        case TOKEN_IN:
+            return "IN";
+        case TOKEN_PRIMARY:
+            return "PRIMARY";
+        case TOKEN_KEY:
+            return "KEY";
+        case TOKEN_REFERENCES:
+            return "REFERENCES";
+        case TOKEN_NULL:
+            return "NULL";
+        case TOKEN_UNIQUE:
+            return "UNIQUE";
         default:
             return "UNKNOWN";
     }
@@ -588,20 +646,106 @@ static bool parse_column_def(ParseContext* ctx, ColumnDef* col) {
                         "Expected column name in column definition", expected,
                         current_token->type == TOKEN_EOF ? "end of input"
                                                          : token_type_name(current_token->type),
-                        "Column definition syntax: column_name TYPE\n"
-                        "Example: id INT, name STRING, price FLOAT");
+                        "Column definition syntax: column_name TYPE [constraints]\n"
+                        "Example: id INT PRIMARY KEY, name STRING NOT NULL, price FLOAT UNIQUE");
         return false;
     }
 
     strcpy(col->name, current_token->value);
     col->name[MAX_COLUMN_NAME_LEN - 1] = '\0';
-    log_msg(LOG_DEBUG, "parse_column_def: Parsing column '%s'", col->name);
     advance();
-
     col->type = parse_data_type(ctx);
     col->nullable = true;
+    col->is_primary_key = false;
+    col->is_unique = false;
+    col->is_foreign_key = false;
+    col->references_table[0] = '\0';
+    col->references_column[0] = '\0';
 
-    log_msg(LOG_DEBUG, "parse_column_def: Column '%s' type=%d", col->name, col->type);
+    while (current_token->type != TOKEN_COMMA && current_token->type != TOKEN_RPAREN &&
+           current_token->type != TOKEN_SEMICOLON) {
+        if (current_token->type == TOKEN_NOT && current_token[1].type == TOKEN_NULL) {
+            col->nullable = false;
+            log_msg(LOG_DEBUG, "parse_column_def: Column '%s' NOT NULL", col->name);
+            advance();
+            advance();
+        } else if (current_token->type == TOKEN_UNIQUE) {
+            col->is_unique = true;
+            log_msg(LOG_DEBUG, "parse_column_def: Column '%s' UNIQUE", col->name);
+            advance();
+        } else if (current_token->type == TOKEN_PRIMARY && current_token[1].type == TOKEN_KEY) {
+            col->is_primary_key = true;
+            col->is_unique = true;
+            col->nullable = false;
+            log_msg(LOG_DEBUG, "parse_column_def: Column '%s' PRIMARY KEY", col->name);
+            advance();
+            advance();
+        } else if (current_token->type == TOKEN_KEY && current_token[-1].type != TOKEN_PRIMARY) {
+            log_msg(LOG_WARN, "parse_column_def: KEY without PRIMARY, ignoring");
+            advance();
+        } else if (current_token->type == TOKEN_KEYWORD &&
+                   strcasecmp(current_token->value, "FOREIGN") == 0 &&
+                   current_token[1].type == TOKEN_KEY) {
+            advance();
+            advance();
+            if (current_token->type == TOKEN_KEYWORD &&
+                strcasecmp(current_token->value, "REFERENCES") == 0) {
+                advance();
+                if (current_token->type == TOKEN_IDENTIFIER) {
+                    size_t table_name_len = strlen(current_token->value);
+                    size_t copy_len = table_name_len < MAX_TABLE_NAME_LEN - 1
+                                          ? table_name_len
+                                          : MAX_TABLE_NAME_LEN - 1;
+                    memcpy(col->references_table, current_token->value, copy_len);
+                    col->references_table[copy_len] = '\0';
+                    advance();
+                    if (current_token->type == TOKEN_LPAREN) {
+                        advance();
+                        if (current_token->type == TOKEN_IDENTIFIER) {
+                            size_t col_name_len = strlen(current_token->value);
+                            size_t copy_len = col_name_len < MAX_COLUMN_NAME_LEN - 1
+                                                  ? col_name_len
+                                                  : MAX_COLUMN_NAME_LEN - 1;
+                            memcpy(col->references_column, current_token->value, copy_len);
+                            col->references_column[copy_len] = '\0';
+                            advance();
+                            if (!expect(ctx, TOKEN_RPAREN, "FOREIGN KEY REFERENCES")) {
+                                return false;
+                            }
+                        } else {
+                            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                                            "Expected column name in FOREIGN KEY REFERENCES",
+                                            "column name", token_type_name(current_token->type),
+                                            NULL);
+                            return false;
+                        }
+                    }
+                    col->is_foreign_key = true;
+                    log_msg(LOG_DEBUG, "parse_column_def: Column '%s' FOREIGN KEY REFERENCES %s.%s",
+                            col->name, col->references_table, col->references_column);
+                } else {
+                    parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                                    "Expected table name in FOREIGN KEY REFERENCES", "table name",
+                                    token_type_name(current_token->type), NULL);
+                    return false;
+                }
+            } else {
+                parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                                "Expected REFERENCES after FOREIGN KEY", "REFERENCES",
+                                token_type_name(current_token->type), NULL);
+                return false;
+            }
+        } else if (current_token->type == TOKEN_KEYWORD) {
+            log_msg(LOG_WARN, "parse_column_def: Unknown keyword '%s', skipping",
+                    current_token->value);
+            advance();
+        } else {
+            break;
+        }
+    }
+
+    log_msg(LOG_DEBUG, "parse_column_def: Done with column '%s'", col->name);
+
     return true;
 }
 
@@ -627,14 +771,14 @@ static ASTNode* parse_create_table(ParseContext* ctx) {
     node->type = AST_CREATE_TABLE;
     node->next = NULL;
 
-    char* dest = node->create_table.table_def.name;
+    char* dest = node->create_table.table_name;
     const char* src = current_token[-1].value;
     size_t copy_len = strlen(src);
     if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
     memcpy(dest, src, copy_len);
     dest[copy_len] = '\0';
 
-    log_msg(LOG_DEBUG, "parse_create_table: Table name = '%s'", node->create_table.table_def.name);
+    log_msg(LOG_DEBUG, "parse_create_table: Table name = '%s'", node->create_table.table_name);
 
     if (!expect(ctx, TOKEN_LPAREN, "CREATE TABLE")) {
         free(node);
@@ -643,38 +787,34 @@ static ASTNode* parse_create_table(ParseContext* ctx) {
 
     log_msg(LOG_DEBUG, "parse_create_table: Starting column parsing");
 
-    int col_count = 0;
-    while (!match(TOKEN_RPAREN) && col_count < MAX_COLUMNS) {
-        log_msg(LOG_DEBUG, "parse_create_table: Parsing column %d", col_count);
+    alist_init(&node->create_table.columns, sizeof(ColumnDef), NULL);
 
-        if (!parse_column_def(ctx, &node->create_table.table_def.columns[col_count])) {
-            log_msg(LOG_ERROR, "parse_create_table: Failed to parse column %d", col_count);
+    int col_count = 0;
+    while (!match(TOKEN_RPAREN)) {
+        ColumnDef* col = (ColumnDef*)alist_append(&node->create_table.columns);
+        if (!col) {
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for columns",
+                            "memory", "NULL", NULL);
+            free(node);
+            return NULL;
+        }
+
+        if (!parse_column_def(ctx, col)) {
+            log_msg(LOG_ERROR, "parse_create_table: Failed to column %d", col_count);
             free(node);
             return NULL;
         }
         col_count++;
 
         if (!consume(ctx, TOKEN_COMMA)) {
-            log_msg(LOG_DEBUG, "parse_create_table: No more commas, column count = %d", col_count);
             break;
         }
-    }
-
-    if (col_count >= MAX_COLUMNS && !match(TOKEN_RPAREN)) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "Too many columns (max %d) in table definition", MAX_COLUMNS);
-        parse_error_set(ctx, PARSE_ERROR_TOO_MANY_COLUMNS, msg, "closing parenthesis ')'",
-                        "more columns", "Reduce number of columns or increase MAX_COLUMNS limit");
-        free(node);
-        return NULL;
     }
 
     if (!expect(ctx, TOKEN_RPAREN, "CREATE TABLE")) {
         free(node);
         return NULL;
     }
-
-    node->create_table.table_def.column_count = col_count;
 
     log_msg(LOG_DEBUG, "parse_create_table: Successfully parsed CREATE TABLE with %d columns",
             col_count);
@@ -684,6 +824,7 @@ static ASTNode* parse_create_table(ParseContext* ctx) {
 static Value parse_value(ParseContext* ctx) {
     (void)ctx;
     Value val;
+    val.type = TYPE_ERROR;
 
     if (match(TOKEN_STRING)) {
         log_msg(LOG_DEBUG, "parse_value: Parsing string value '%s'", current_token->value);
@@ -703,6 +844,11 @@ static Value parse_value(ParseContext* ctx) {
         }
         advance();
         return val;
+    } else if (match(TOKEN_NULL)) {
+        log_msg(LOG_DEBUG, "parse_value: Parsing NULL value");
+        val.type = TYPE_NULL;
+        advance();
+        return val;
     } else if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "NULL") == 0) {
         log_msg(LOG_DEBUG, "parse_value: Parsing NULL value");
         val.type = TYPE_NULL;
@@ -711,22 +857,22 @@ static Value parse_value(ParseContext* ctx) {
     } else if (match(TOKEN_DATE)) {
         log_msg(LOG_DEBUG, "parse_value: Parsing date value '%s'", current_token->value);
         val.type = TYPE_DATE;
-        if (sscanf(current_token->value, "%d-%d-%d", &val.date_val.year, &val.date_val.month,
-                   &val.date_val.day) != 3) {
-            val.date_val.year = 0;
-            val.date_val.month = 0;
-            val.date_val.day = 0;
+        int year, month, day;
+        if (sscanf(current_token->value, "%d-%d-%d", &year, &month, &day) == 3) {
+            val.date_val.date_val = make_date(year, month, day);
+        } else {
+            val.date_val.date_val = 0;
         }
         advance();
         return val;
     } else if (match(TOKEN_TIME)) {
         log_msg(LOG_DEBUG, "parse_value: Parsing time value '%s'", current_token->value);
         val.type = TYPE_TIME;
-        if (sscanf(current_token->value, "%d:%d:%d", &val.time_val.hour, &val.time_val.minute,
-                   &val.time_val.second) != 3) {
-            val.time_val.hour = 0;
-            val.time_val.minute = 0;
-            val.time_val.second = 0;
+        int hour, minute, second;
+        if (sscanf(current_token->value, "%d:%d:%d", &hour, &minute, &second) == 3) {
+            val.time_val.time_val = make_time(hour, minute, second);
+        } else {
+            val.time_val.time_val = 0;
         }
         advance();
         return val;
@@ -811,7 +957,93 @@ static Expr* parse_aggregate_func(ParseContext* ctx) {
         return NULL;
     }
 
-    log_msg(LOG_DEBUG, "parse_aggregate_func: Successfully parsed aggregate function");
+    log_msg(LOG_DEBUG, "parse_scalar_func: Successfully parsed aggregate function");
+    return expr;
+}
+
+static Expr* parse_scalar_func(ParseContext* ctx) {
+    Expr* expr = malloc(sizeof(Expr));
+    if (!expr) {
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
+                        "Memory allocation failed for scalar function", "expression", "NULL",
+                        "Try again or simplify your query");
+        return NULL;
+    }
+
+    memset(expr, 0, sizeof(Expr));
+    expr->type = EXPR_SCALAR_FUNC;
+
+    if (strcasecmp(current_token->value, "ABS") == 0) {
+        expr->scalar.func_type = FUNC_ABS;
+    } else if (strcasecmp(current_token->value, "SQRT") == 0) {
+        expr->scalar.func_type = FUNC_SQRT;
+    } else if (strcasecmp(current_token->value, "MOD") == 0) {
+        expr->scalar.func_type = FUNC_MOD;
+    } else if (strcasecmp(current_token->value, "POWER") == 0) {
+        expr->scalar.func_type = FUNC_POW;
+    } else if (strcasecmp(current_token->value, "ROUND") == 0) {
+        expr->scalar.func_type = FUNC_ROUND;
+    } else if (strcasecmp(current_token->value, "FLOOR") == 0) {
+        expr->scalar.func_type = FUNC_FLOOR;
+    } else if (strcasecmp(current_token->value, "CEIL") == 0 ||
+               strcasecmp(current_token->value, "CEILING") == 0) {
+        expr->scalar.func_type = FUNC_CEIL;
+    } else if (strcasecmp(current_token->value, "UPPER") == 0) {
+        expr->scalar.func_type = FUNC_UPPER;
+    } else if (strcasecmp(current_token->value, "LOWER") == 0) {
+        expr->scalar.func_type = FUNC_LOWER;
+    } else if (strcasecmp(current_token->value, "LENGTH") == 0 ||
+               strcasecmp(current_token->value, "LEN") == 0) {
+        expr->scalar.func_type = FUNC_LEN;
+    } else if (strcasecmp(current_token->value, "MID") == 0 ||
+               strcasecmp(current_token->value, "SUBSTRING") == 0) {
+        expr->scalar.func_type = FUNC_MID;
+    } else if (strcasecmp(current_token->value, "LEFT") == 0) {
+        expr->scalar.func_type = FUNC_LEFT;
+    } else if (strcasecmp(current_token->value, "RIGHT") == 0) {
+        expr->scalar.func_type = FUNC_RIGHT;
+    } else if (strcasecmp(current_token->value, "CONCAT") == 0) {
+        expr->scalar.func_type = FUNC_CONCAT;
+    } else {
+        log_msg(LOG_DEBUG, "parse_scalar_func: Unknown scalar function '%s'", current_token->value);
+        free(expr);
+        return NULL;
+    }
+
+    advance();
+
+    if (!expect(ctx, TOKEN_LPAREN, "scalar function")) {
+        free(expr);
+        return NULL;
+    }
+
+    expr->scalar.arg_count = 0;
+
+    if (match(TOKEN_RPAREN)) {
+        log_msg(LOG_DEBUG, "parse_scalar_func: Empty arguments for function");
+        return expr;
+    }
+
+    while (expr->scalar.arg_count < 3 && !match(TOKEN_RPAREN)) {
+        if (expr->scalar.arg_count > 0) {
+            if (!expect(ctx, TOKEN_COMMA, "scalar function arguments")) {
+                free(expr);
+                return NULL;
+            }
+        }
+        Expr* arg = parse_or_expr(ctx);
+        if (!arg) {
+            free(expr);
+            return NULL;
+        }
+        expr->scalar.args[expr->scalar.arg_count++] = arg;
+    }
+
+    if (!expect(ctx, TOKEN_RPAREN, "scalar function")) {
+        free(expr);
+        return NULL;
+    }
+
     return expr;
 }
 
@@ -836,19 +1068,19 @@ static Expr* parse_primary(ParseContext* ctx) {
         expr->type = EXPR_VALUE;
         if (match(TOKEN_DATE)) {
             expr->value.type = TYPE_DATE;
-            if (sscanf(current_token->value, "%d-%d-%d", &expr->value.date_val.year,
-                       &expr->value.date_val.month, &expr->value.date_val.day) != 3) {
-                expr->value.date_val.year = 0;
-                expr->value.date_val.month = 0;
-                expr->value.date_val.day = 0;
+            int year, month, day;
+            if (sscanf(current_token->value, "%d-%d-%d", &year, &month, &day) == 3) {
+                expr->value.date_val.date_val = make_date(year, month, day);
+            } else {
+                expr->value.date_val.date_val = 0;
             }
         } else if (match(TOKEN_TIME)) {
             expr->value.type = TYPE_TIME;
-            if (sscanf(current_token->value, "%d:%d:%d", &expr->value.time_val.hour,
-                       &expr->value.time_val.minute, &expr->value.time_val.second) != 3) {
-                expr->value.time_val.hour = 0;
-                expr->value.time_val.minute = 0;
-                expr->value.time_val.second = 0;
+            int hour, minute, second;
+            if (sscanf(current_token->value, "%d:%d:%d", &hour, &minute, &second) == 3) {
+                expr->value.time_val.time_val = make_time(hour, minute, second);
+            } else {
+                expr->value.time_val.time_val = 0;
             }
         } else if (match(TOKEN_STRING)) {
             expr->value.type = TYPE_STRING;
@@ -871,9 +1103,11 @@ static Expr* parse_primary(ParseContext* ctx) {
         strcpy(expr->value.char_val, "NULL");
         advance();
     } else if (match(TOKEN_AGGREGATE_FUNC)) {
-        log_msg(LOG_DEBUG, "parse_primary: Delegating to aggregate function parser");
         free(expr);
         return parse_aggregate_func(ctx);
+    } else if (match(TOKEN_SCALAR_FUNC)) {
+        free(expr);
+        return parse_scalar_func(ctx);
     } else if (match(TOKEN_LPAREN)) {
         log_msg(LOG_DEBUG, "parse_primary: Parsing parenthesized expression");
         advance();
@@ -952,8 +1186,8 @@ static Expr* parse_subquery(ParseContext* ctx) {
 
     if (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "SELECT") != 0) {
         log_msg(LOG_WARN, "parse_subquery: Expected SELECT keyword");
-        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected SELECT in subquery",
-                        "SELECT", current_token->value, "subquery");
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected SELECT in subquery", "SELECT",
+                        current_token->value, "subquery");
         return NULL;
     }
 
@@ -1127,14 +1361,11 @@ static ASTNode* parse_insert(ParseContext* ctx) {
     node->type = AST_INSERT_ROW;
     node->next = NULL;
 
-    char* dest = node->insert.table_name;
-    const char* src = current_token[-1].value;
-    size_t copy_len = strlen(src);
-    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
-    memcpy(dest, src, copy_len);
-    dest[copy_len] = '\0';
+    const char* table_name = current_token[-1].value;
+    Table* table = find_table(table_name);
+    node->insert.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_insert: Table name = '%s'", node->insert.table_name);
+    log_msg(LOG_DEBUG, "parse_insert: Table name = '%s', table_id = %d", table_name, node->insert.table_id);
 
     if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "VALUES") == 0) {
         log_msg(LOG_DEBUG, "parse_insert: Found VALUES keyword");
@@ -1148,26 +1379,23 @@ static ASTNode* parse_insert(ParseContext* ctx) {
 
     log_msg(LOG_DEBUG, "parse_insert: Starting value parsing");
 
-    int val_count = 0;
-    while (!match(TOKEN_RPAREN) && val_count < MAX_COLUMNS) {
-        log_msg(LOG_DEBUG, "parse_insert: Parsing value %d", val_count);
-        node->insert.values[val_count].value = parse_value(ctx);
-        strcpy(node->insert.values[val_count].column_name, "");
-        val_count++;
+    alist_init(&node->insert.values, sizeof(ColumnValue), free_column_value);
+
+    while (!match(TOKEN_RPAREN)) {
+        ColumnValue* cv = (ColumnValue*)alist_append(&node->insert.values);
+        if (!cv) {
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for values",
+                            "memory", "NULL", NULL);
+            free(node);
+            return NULL;
+        }
+        cv->value = parse_value(ctx);
+        cv->column_name[0] = '\0';
 
         if (!consume(ctx, TOKEN_COMMA)) {
-            log_msg(LOG_DEBUG, "parse_insert: No more commas, value count = %d", val_count);
+            log_msg(LOG_DEBUG, "parse_insert: No more commas");
             break;
         }
-    }
-
-    if (val_count >= MAX_COLUMNS && !match(TOKEN_RPAREN)) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "Too many values (max %d) in INSERT", MAX_COLUMNS);
-        parse_error_set(ctx, PARSE_ERROR_TOO_MANY_COLUMNS, msg, "closing parenthesis ')'",
-                        "more values", "Reduce number of values");
-        free(node);
-        return NULL;
     }
 
     if (!expect(ctx, TOKEN_RPAREN, "INSERT")) {
@@ -1175,9 +1403,8 @@ static ASTNode* parse_insert(ParseContext* ctx) {
         return NULL;
     }
 
-    node->insert.value_count = val_count;
-
-    log_msg(LOG_DEBUG, "parse_insert: Successfully parsed INSERT with %d values", val_count);
+    log_msg(LOG_DEBUG, "parse_insert: Successfully parsed INSERT with %d values",
+            alist_length(&node->insert.values));
     return node;
 }
 
@@ -1195,7 +1422,8 @@ static ASTNode* parse_select(ParseContext* ctx) {
     node->type = AST_SELECT;
     node->next = NULL;
 
-    int expr_count = 0;
+    alist_init(&node->select.expressions, sizeof(Expr*), NULL);
+
     if (match(TOKEN_OPERATOR) && strcmp(current_token->value, "*") == 0) {
         log_msg(LOG_DEBUG, "parse_select: Found * (all columns)");
         Expr* star_expr = malloc(sizeof(Expr));
@@ -1213,24 +1441,17 @@ static ASTNode* parse_select(ParseContext* ctx) {
                 advance();
             }
         }
-        node->select.expressions[expr_count] = star_expr;
+        Expr** expr_ptr = (Expr**)alist_append(&node->select.expressions);
+        if (expr_ptr) *expr_ptr = star_expr;
         advance();
-        expr_count++;
     } else {
-        while (expr_count < MAX_COLUMNS) {
-            log_msg(LOG_DEBUG, "parse_select: Parsing expression %d", expr_count);
-
+        while (true) {
             if (match(TOKEN_IDENTIFIER) ||
                 (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "FROM") != 0) ||
                 match(TOKEN_AGGREGATE_FUNC) || match(TOKEN_SCALAR_FUNC)) {
                 Expr* expr = parse_or_expr(ctx);
                 if (!expr) {
-                    log_msg(LOG_ERROR, "parse_select: Failed to parse expression %d", expr_count);
-                    for (int i = 0; i < expr_count; i++) {
-                        if (node->select.expressions[i]) {
-                            free(node->select.expressions[i]);
-                        }
-                    }
+                    log_msg(LOG_ERROR, "parse_select: Failed to parse expression");
                     free(node);
                     return NULL;
                 }
@@ -1245,22 +1466,21 @@ static ASTNode* parse_select(ParseContext* ctx) {
                     }
                 }
 
-                node->select.expressions[expr_count] = expr;
-                expr_count++;
+                Expr** expr_ptr = (Expr**)alist_append(&node->select.expressions);
+                if (expr_ptr) *expr_ptr = expr;
             } else {
                 log_msg(LOG_DEBUG, "parse_select: No more expressions");
                 break;
             }
 
             if (!consume(ctx, TOKEN_COMMA)) {
-                log_msg(LOG_DEBUG, "parse_select: No more commas, expression count = %d",
-                        expr_count);
+                log_msg(LOG_DEBUG, "parse_select: No more commas");
                 break;
             }
         }
     }
 
-    if (expr_count == 0) {
+    if (alist_length(&node->select.expressions) == 0) {
         parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
                         "Expected at least one column or * in SELECT",
                         "column name, *, or aggregate function",
@@ -1270,11 +1490,6 @@ static ASTNode* parse_select(ParseContext* ctx) {
                         "Examples:\n"
                         "  SELECT * FROM users\n"
                         "  SELECT name, age FROM users");
-        for (int i = 0; i < expr_count; i++) {
-            if (node->select.expressions[i]) {
-                free(node->select.expressions[i]);
-            }
-        }
         free(node);
         return NULL;
     }
@@ -1301,11 +1516,6 @@ static ASTNode* parse_select(ParseContext* ctx) {
                             "Did you forget the FROM keyword?\n"
                             "  SELECT columns FROM table_name");
         }
-        for (int i = 0; i < expr_count; i++) {
-            if (node->select.expressions[i]) {
-                free(node->select.expressions[i]);
-            }
-        }
         free(node);
         return NULL;
     }
@@ -1324,23 +1534,22 @@ static ASTNode* parse_select(ParseContext* ctx) {
                             "  SELECT name, age FROM users\n"
                             "  SELECT * FROM users WHERE age > 18");
         }
-        for (int i = 0; i < expr_count; i++) {
-            if (node->select.expressions[i]) {
-                free(node->select.expressions[i]);
-            }
-        }
         free(node);
         return NULL;
     }
 
-    strncpy(node->select.table_name, current_token[-1].value, MAX_TABLE_NAME_LEN - 1);
-    node->select.table_name[MAX_TABLE_NAME_LEN - 1] = '\0';
+    const char* table_name = current_token[-1].value;
+    Table* table = find_table(table_name);
+    node->select.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_select: Table name = '%s'", node->select.table_name);
+    log_msg(LOG_DEBUG, "parse_select: Table name = '%s', table_id = %d", table_name, node->select.table_id);
 
     node->select.where_clause = parse_where_clause(ctx);
     node->select.order_by_count = 0;
     node->select.limit = 0;
+
+    alist_init(&node->select.order_by, sizeof(Expr*), NULL);
+    alist_init(&node->select.order_by_desc, sizeof(bool), NULL);
 
     if (current_token->type == TOKEN_ORDER) {
         advance();
@@ -1349,40 +1558,29 @@ static ASTNode* parse_select(ParseContext* ctx) {
                 ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'BY' after 'ORDER'", "BY keyword",
                 current_token->type == TOKEN_EOF ? "end of input" : current_token->value,
                 "Use ORDER BY column_name [ASC|DESC]");
-            for (int i = 0; i < expr_count; i++) {
-                if (node->select.expressions[i]) free(node->select.expressions[i]);
-            }
-            for (int i = 0; i < node->select.order_by_count; i++) {
-                if (node->select.order_by[i]) free(node->select.order_by[i]);
-            }
             free(node);
             return NULL;
         }
         advance();
 
-        while (node->select.order_by_count < MAX_COLUMNS) {
+        while (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "LIMIT") != 0) {
             if (match(TOKEN_IDENTIFIER)) {
                 Expr* order_expr = parse_primary(ctx);
                 if (!order_expr) {
-                    for (int i = 0; i < expr_count; i++) {
-                        if (node->select.expressions[i]) free(node->select.expressions[i]);
-                    }
-                    for (int i = 0; i < node->select.order_by_count; i++) {
-                        if (node->select.order_by[i]) free(node->select.order_by[i]);
-                    }
                     free(node);
                     return NULL;
                 }
-                node->select.order_by[node->select.order_by_count] = order_expr;
-                node->select.order_by_desc[node->select.order_by_count] = false;
-                node->select.order_by_count++;
-
+                Expr** expr_ptr = (Expr**)alist_append(&node->select.order_by);
+                if (expr_ptr) *expr_ptr = order_expr;
+                bool desc = false;
                 if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "DESC") == 0) {
-                    node->select.order_by_desc[node->select.order_by_count - 1] = true;
+                    desc = true;
                     advance();
                 } else if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "ASC") == 0) {
                     advance();
                 }
+                bool* desc_ptr = (bool*)alist_append(&node->select.order_by_desc);
+                if (desc_ptr) *desc_ptr = desc;
 
                 if (!consume(ctx, TOKEN_COMMA)) {
                     break;
@@ -1401,12 +1599,6 @@ static ASTNode* parse_select(ParseContext* ctx) {
                             current_token->type == TOKEN_EOF ? "end of input"
                                                              : token_type_name(current_token->type),
                             "Use LIMIT n where n is a positive integer");
-            for (int i = 0; i < expr_count; i++) {
-                if (node->select.expressions[i]) free(node->select.expressions[i]);
-            }
-            for (int i = 0; i < node->select.order_by_count; i++) {
-                if (node->select.order_by[i]) free(node->select.order_by[i]);
-            }
             free(node);
             return NULL;
         }
@@ -1414,9 +1606,10 @@ static ASTNode* parse_select(ParseContext* ctx) {
         advance();
     }
 
-    node->select.expression_count = expr_count;
+    node->select.order_by_count = alist_length(&node->select.order_by);
 
-    log_msg(LOG_DEBUG, "parse_select: Successfully parsed SELECT with %d expressions", expr_count);
+    log_msg(LOG_DEBUG, "parse_select: Successfully parsed SELECT with %d expressions",
+            alist_length(&node->select.expressions));
     return node;
 }
 
@@ -1445,14 +1638,11 @@ static ASTNode* parse_drop_table(ParseContext* ctx) {
     node->type = AST_DROP_TABLE;
     node->next = NULL;
 
-    char* dest = node->drop_table.table_name;
-    const char* src = current_token->value;
-    size_t copy_len = strlen(src);
-    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
-    memcpy(dest, src, copy_len);
-    dest[copy_len] = '\0';
+    const char* table_name = current_token->value;
+    Table* table = find_table(table_name);
+    node->drop_table.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_drop_table: Table name = '%s'", node->drop_table.table_name);
+    log_msg(LOG_DEBUG, "parse_drop_table: Table name = '%s', table_id = %d", table_name, node->drop_table.table_id);
     advance();
 
     return node;
@@ -1476,14 +1666,11 @@ static ASTNode* parse_update(ParseContext* ctx) {
     node->type = AST_UPDATE_ROW;
     node->next = NULL;
 
-    char* dest = node->update.table_name;
-    const char* src = current_token[-1].value;
-    size_t copy_len = strlen(src);
-    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
-    memcpy(dest, src, copy_len);
-    dest[copy_len] = '\0';
+    const char* table_name = current_token[-1].value;
+    Table* table = find_table(table_name);
+    node->update.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_update: Table name = '%s'", node->update.table_name);
+    log_msg(LOG_DEBUG, "parse_update: Table name = '%s', table_id = %d", table_name, node->update.table_id);
 
     if (!expect(ctx, TOKEN_KEYWORD, "UPDATE") || strcasecmp(current_token[-1].value, "SET") != 0) {
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
@@ -1496,8 +1683,9 @@ static ASTNode* parse_update(ParseContext* ctx) {
 
     log_msg(LOG_DEBUG, "parse_update: Starting SET clause parsing");
 
-    int val_count = 0;
-    while (val_count < MAX_COLUMNS) {
+    alist_init(&node->update.values, sizeof(ColumnValue), free_column_value);
+
+    while (true) {
         if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "WHERE") == 0) {
             log_msg(LOG_DEBUG, "parse_update: Found WHERE keyword, stopping SET parsing");
             break;
@@ -1513,13 +1701,20 @@ static ASTNode* parse_update(ParseContext* ctx) {
             return NULL;
         }
 
+        ColumnValue* cv = (ColumnValue*)alist_append(&node->update.values);
+        if (!cv) {
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for values",
+                            "memory", "NULL", NULL);
+            free(node);
+            return NULL;
+        }
+
         size_t len = strlen(current_token->value);
         if (len >= MAX_COLUMN_NAME_LEN) len = MAX_COLUMN_NAME_LEN - 1;
-        memcpy(node->update.values[val_count].column_name, current_token->value, len);
-        node->update.values[val_count].column_name[len] = '\0';
+        memcpy(cv->column_name, current_token->value, len);
+        cv->column_name[len] = '\0';
 
-        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s'",
-                node->update.values[val_count].column_name);
+        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s'", cv->column_name);
         advance();
 
         if (!expect(ctx, TOKEN_EQUALS, "UPDATE")) {
@@ -1527,16 +1722,13 @@ static ASTNode* parse_update(ParseContext* ctx) {
             return NULL;
         }
 
-        node->update.values[val_count].value = parse_value(ctx);
-        val_count++;
+        cv->value = parse_value(ctx);
 
         if (!consume(ctx, TOKEN_COMMA)) {
-            log_msg(LOG_DEBUG, "parse_update: No more commas, assignment count = %d", val_count);
+            log_msg(LOG_DEBUG, "parse_update: No more commas");
             break;
         }
     }
-
-    node->update.value_count = val_count;
 
     if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "WHERE") == 0) {
         log_msg(LOG_DEBUG, "parse_update: Found WHERE clause");
@@ -1550,7 +1742,8 @@ static ASTNode* parse_update(ParseContext* ctx) {
         node->update.where_clause = NULL;
     }
 
-    log_msg(LOG_DEBUG, "parse_update: Successfully parsed UPDATE with %d assignments", val_count);
+    log_msg(LOG_DEBUG, "parse_update: Successfully parsed UPDATE with %d assignments",
+            alist_length(&node->update.values));
     return node;
 }
 
@@ -1580,14 +1773,11 @@ static ASTNode* parse_delete(ParseContext* ctx) {
     node->type = AST_DELETE_ROW;
     node->next = NULL;
 
-    char* dest = node->delete.table_name;
-    const char* src = current_token[-1].value;
-    size_t copy_len = strlen(src);
-    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
-    memcpy(dest, src, copy_len);
-    dest[copy_len] = '\0';
+    const char* table_name = current_token[-1].value;
+    Table* table = find_table(table_name);
+    node->delete.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_delete: Table name = '%s'", node->delete.table_name);
+    log_msg(LOG_DEBUG, "parse_delete: Table name = '%s', table_id = %d", table_name, node->delete.table_id);
 
     if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "WHERE") == 0) {
         log_msg(LOG_DEBUG, "parse_delete: Found WHERE clause");
@@ -1602,6 +1792,143 @@ static ASTNode* parse_delete(ParseContext* ctx) {
     }
 
     log_msg(LOG_DEBUG, "parse_delete: Successfully parsed DELETE");
+    return node;
+}
+
+static ASTNode* parse_create_index(ParseContext* ctx) {
+    log_msg(LOG_DEBUG, "parse_create_index: Starting CREATE INDEX parsing");
+
+    /* Note: parse_with_context has already advanced past 'INDEX' keyword,
+     * so current_token is now at the index name */
+
+    if (!match(TOKEN_IDENTIFIER)) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected index name after 'INDEX'",
+                        "index name (IDENTIFIER)", token_type_name(current_token->type),
+                        "Syntax: CREATE INDEX index_name ON table_name (column_name)");
+        return NULL;
+    }
+
+    ASTNode* node = malloc(sizeof(ASTNode));
+    if (!node) {
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
+                        "Memory allocation failed for CREATE INDEX node", "memory", "NULL",
+                        "Try again or reduce query complexity");
+        return NULL;
+    }
+
+    memset(node, 0, sizeof(ASTNode));
+    node->type = AST_CREATE_INDEX;
+    node->next = NULL;
+
+    char* dest = node->create_index.index_name;
+    const char* src = current_token->value;
+    size_t copy_len = strlen(src);
+    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
+
+    log_msg(LOG_DEBUG, "parse_create_index: Index name = '%s'", node->create_index.index_name);
+    advance();
+
+    if (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "ON") != 0) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'ON' keyword after index name",
+                        "ON keyword", current_token->value,
+                        "Syntax: CREATE INDEX index_name ON table_name (column_name)");
+        free(node);
+        return NULL;
+    }
+
+    advance(); /* Move past ON keyword */
+
+    if (!match(TOKEN_IDENTIFIER)) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected table name after 'ON'",
+                        "table name (IDENTIFIER)", token_type_name(current_token->type),
+                        "Syntax: CREATE INDEX index_name ON table_name (column_name)");
+        free(node);
+        return NULL;
+    }
+
+    const char* table_name = current_token->value;
+    Table* table = find_table(table_name);
+    node->create_index.table_id = table ? table->table_id : -1;
+
+    log_msg(LOG_DEBUG, "parse_create_index: Table name = '%s', table_id = %d", table_name, node->create_index.table_id);
+    advance();
+
+    if (!match(TOKEN_LPAREN)) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected '(' after table name",
+                        "LPAREN", token_type_name(current_token->type),
+                        "Syntax: CREATE INDEX index_name ON table_name (column_name)");
+        free(node);
+        return NULL;
+    }
+
+    advance(); /* Move past '(' */
+
+    if (!match(TOKEN_IDENTIFIER)) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                        "Expected column name in index definition", "column name (IDENTIFIER)",
+                        current_token->value,
+                        "Syntax: CREATE INDEX index_name ON table_name (column_name)");
+        free(node);
+        return NULL;
+    }
+
+    char* col_dest = node->create_index.column_name;
+    const char* col_src = current_token->value;
+    size_t col_copy_len = strlen(col_src);
+    if (col_copy_len >= MAX_COLUMN_NAME_LEN) col_copy_len = MAX_COLUMN_NAME_LEN - 1;
+    memcpy(col_dest, col_src, col_copy_len);
+    col_dest[col_copy_len] = '\0';
+
+    log_msg(LOG_DEBUG, "parse_create_index: Column name = '%s'", node->create_index.column_name);
+    advance();
+
+    if (!match(TOKEN_RPAREN)) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected ')' after column name",
+                        "RPAREN", token_type_name(current_token->type),
+                        "Make sure all parentheses are balanced");
+        free(node);
+        return NULL;
+    }
+
+    log_msg(LOG_DEBUG, "parse_create_index: Successfully parsed CREATE INDEX");
+    return node;
+}
+
+static ASTNode* parse_drop_index(ParseContext* ctx) {
+    log_msg(LOG_DEBUG, "parse_drop_index: Starting DROP INDEX parsing");
+
+    if (!match(TOKEN_IDENTIFIER)) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected index name after 'DROP INDEX'",
+                        "index name (IDENTIFIER)", token_type_name(current_token->type),
+                        "Syntax: DROP INDEX index_name");
+        return NULL;
+    }
+
+    ASTNode* node = malloc(sizeof(ASTNode));
+    if (!node) {
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
+                        "Memory allocation failed for DROP INDEX node", "memory", "NULL",
+                        "Try again or reduce query complexity");
+        return NULL;
+    }
+
+    memset(node, 0, sizeof(ASTNode));
+    node->type = AST_DROP_INDEX;
+    node->next = NULL;
+
+    char* dest = node->drop_index.index_name;
+    const char* src = current_token->value;
+    size_t copy_len = strlen(src);
+    if (copy_len >= MAX_TABLE_NAME_LEN) copy_len = MAX_TABLE_NAME_LEN - 1;
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
+
+    log_msg(LOG_DEBUG, "parse_drop_index: Index name = '%s'", node->drop_index.index_name);
+    advance();
+
+    log_msg(LOG_DEBUG, "parse_drop_index: Successfully parsed DROP INDEX");
     return node;
 }
 
@@ -1628,10 +1955,14 @@ ASTNode* parse_with_context(ParseContext* ctx, Token* tokens) {
                 advance();
                 log_msg(LOG_DEBUG, "parse: Parsing CREATE TABLE statement");
                 return parse_create_table(ctx);
+            } else if (strcasecmp(current_token->value, "INDEX") == 0) {
+                advance();
+                log_msg(LOG_DEBUG, "parse: Parsing CREATE INDEX statement");
+                return parse_create_index(ctx);
             } else {
                 parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
-                                "Expected 'TABLE' keyword after 'CREATE'", "TABLE keyword",
-                                current_token->value,
+                                "Expected 'TABLE' or 'INDEX' keyword after 'CREATE'",
+                                "TABLE or INDEX keyword", current_token->value,
                                 "Did you mean: CREATE TABLE table_name (...) ?");
                 return NULL;
             }
@@ -1658,10 +1989,14 @@ ASTNode* parse_with_context(ParseContext* ctx, Token* tokens) {
                 advance();
                 log_msg(LOG_DEBUG, "parse: Parsing DROP TABLE statement");
                 return parse_drop_table(ctx);
+            } else if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "INDEX") == 0) {
+                advance();
+                log_msg(LOG_DEBUG, "parse: Parsing DROP INDEX statement");
+                return parse_drop_index(ctx);
             } else {
                 parse_error_set(
-                    ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'TABLE' keyword after 'DROP'",
-                    "TABLE keyword",
+                    ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                    "Expected 'TABLE' or 'INDEX' keyword after 'DROP'", "TABLE or INDEX keyword",
                     current_token->type == TOKEN_EOF ? "end of input" : current_token->value,
                     "Did you mean: DROP TABLE table_name ?");
                 return NULL;
@@ -1721,5 +2056,44 @@ ASTNode* parse(Token* tokens) { return parse_ex(NULL, tokens); }
 void free_ast(ASTNode* ast) {
     if (!ast) return;
     free_ast(ast->next);
+
+    switch (ast->type) {
+        case AST_INSERT_ROW:
+            alist_destroy(&ast->insert.values);
+            break;
+        case AST_CREATE_TABLE:
+            alist_destroy(&ast->create_table.columns);
+            break;
+        case AST_UPDATE_ROW:
+            alist_destroy(&ast->update.values);
+            break;
+        case AST_DELETE_ROW:
+            break;
+        case AST_SELECT: {
+            int expr_count = alist_length(&ast->select.expressions);
+            for (int i = 0; i < expr_count; i++) {
+                Expr** expr_ptr = (Expr**)alist_get(&ast->select.expressions, i);
+                if (expr_ptr && *expr_ptr) {
+                    free_expr_contents(*expr_ptr);
+                    free(*expr_ptr);
+                }
+            }
+            alist_destroy(&ast->select.expressions);
+            int order_by_count = alist_length(&ast->select.order_by);
+            for (int i = 0; i < order_by_count; i++) {
+                Expr** expr_ptr = (Expr**)alist_get(&ast->select.order_by, i);
+                if (expr_ptr && *expr_ptr) {
+                    free_expr_contents(*expr_ptr);
+                    free(*expr_ptr);
+                }
+            }
+            alist_destroy(&ast->select.order_by);
+            alist_destroy(&ast->select.order_by_desc);
+            break;
+        }
+        default:
+            break;
+    }
+
     free(ast);
 }

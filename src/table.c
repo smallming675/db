@@ -3,10 +3,30 @@
 #include "db.h"
 #include "logger.h"
 #include "values.h"
+#include "arraylist.h"
+#include <strings.h>
 
 ArrayList tables;
+ArrayList indexes;
+static int next_table_id = 1;
 
-static Table* find_table(const char* name);
+static void free_index(void* ptr);
+
+static void free_row_contents(void* ptr) {
+    Row* row = (Row*)ptr;
+    if (!row) return;
+
+    for (int i = 0; i < row->value_count; i++) {
+        if (row->values[i].type == TYPE_STRING && row->values[i].char_val) {
+            free(row->values[i].char_val);
+        }
+    }
+
+    free(row->values);
+    row->values = NULL;
+    row->value_count = 0;
+    row->value_capacity = 0;
+}
 
 Row* create_row(int initial_capacity) {
     Row* row = malloc(sizeof(Row));
@@ -14,13 +34,9 @@ Row* create_row(int initial_capacity) {
 
     row->value_capacity = initial_capacity > 0 ? initial_capacity : 4;
     row->values = malloc(row->value_capacity * sizeof(Value));
-    row->is_null = malloc(row->value_capacity * sizeof(bool));
     row->value_count = 0;
 
-    if (!row->values || !row->is_null) {
-        /* Clean up on failure */
-        free(row->values);
-        free(row->is_null);
+    if (!row->values) {
         free(row);
         return NULL;
     }
@@ -39,7 +55,6 @@ void free_row(Row* row) {
     }
 
     free(row->values);
-    free(row->is_null);
     free(row);
 }
 
@@ -47,14 +62,17 @@ int resize_row(Row* row, int new_capacity) {
     if (new_capacity <= 0) new_capacity = 4;
 
     Value* new_values = realloc(row->values, new_capacity * sizeof(Value));
-    bool* new_is_null = realloc(row->is_null, new_capacity * sizeof(bool));
-    if (!new_values || !new_is_null) return 0;
+    if (!new_values) return 0;
 
     row->values = new_values;
-    row->is_null = new_is_null;
     row->value_capacity = new_capacity;
 
     return 1;
+}
+
+static void free_column_def_contents(void* ptr) {
+    ColumnDef* col = (ColumnDef*)ptr;
+    (void)col;
 }
 
 /* Callback function for alist_destroy() to free Table objects */
@@ -62,21 +80,16 @@ void free_table_internal(void* ptr) {
     Table* table = (Table*)ptr;
     if (!table) return;
 
-    for (int i = 0; i < table->row_count; i++) {
-        Row* row = &table->rows[i];
-        /* Free any allocated string values */
-        for (int j = 0; j < row->value_count; j++) {
-            if (row->values[j].type == TYPE_STRING && row->values[j].char_val) {
-                free(row->values[j].char_val);
-            }
-        }
-        free(row->values);
-        free(row->is_null);
+    if (table->rows.data != NULL) {
+        alist_destroy(&table->rows);
     }
-    free(table->rows);
+    if (table->schema.columns.data != NULL) {
+        alist_destroy(&table->schema.columns);
+    }
 }
 
 Table* create_table(const char* name, int initial_row_capacity) {
+    (void)initial_row_capacity;
     if (alist_length(&tables) >= MAX_TABLES) {
         log_msg(LOG_ERROR, "create_table: Maximum table limit (%d) reached", MAX_TABLES);
         return NULL;
@@ -87,54 +100,32 @@ Table* create_table(const char* name, int initial_row_capacity) {
     strncpy(table->name, name, MAX_TABLE_NAME_LEN - 1);
     table->name[MAX_TABLE_NAME_LEN - 1] = '\0';
 
-    table->row_capacity = initial_row_capacity > 0 ? initial_row_capacity : 4;
-    table->rows = malloc(table->row_capacity * sizeof(Row));
-    table->row_count = 0;
-
-    if (!table->rows) {
-        return NULL;
-    }
-
-    for (int i = 0; i < table->row_capacity; i++) {
-        table->rows[i].values = NULL;
-        table->rows[i].is_null = NULL;
-        table->rows[i].value_count = 0;
-        table->rows[i].value_capacity = 0;
-    }
+    table->table_id = next_table_id++;
+    alist_init(&table->rows, sizeof(Row), free_row_contents);
+    alist_init(&table->schema.columns, sizeof(ColumnDef), free_column_def_contents);
 
     return table;
 }
 
-/* Frees all resources associated with a table. 
+/* Frees all resources associated with a table.
  * used when manually removing a table (not via alist_remove). */
 void free_table(Table* table) {
     if (!table) return;
-    for (int i = 0; i < table->row_count; i++) {
-        free_row(&table->rows[i]);
+    if (table->rows.data != NULL) {
+        alist_destroy(&table->rows);
     }
-    free(table->rows);
+    if (table->schema.columns.data != NULL) {
+        alist_destroy(&table->schema.columns);
+    }
 }
 
 int resize_table(Table* table, int new_capacity) {
-    if (new_capacity <= 0) new_capacity = 4;
-
-    Row* new_rows = realloc(table->rows, new_capacity * sizeof(Row));
-    if (!new_rows) return 0;
-
-    table->rows = new_rows;
-    table->row_capacity = new_capacity;
-
-    for (int i = table->row_count; i < table->row_capacity; i++) {
-        table->rows[i].values = NULL;
-        table->rows[i].is_null = NULL;
-        table->rows[i].value_count = 0;
-        table->rows[i].value_capacity = 0;
-    }
-
+    (void)table;
+    (void)new_capacity;
     return 1;
 }
 
-static Value copy_value(const Value* src) {
+Value copy_value(const Value* src) {
     Value dst = *src;
     if (src->type == TYPE_STRING && src->char_val != NULL) {
         dst.char_val = malloc(strlen(src->char_val) + 1);
@@ -143,6 +134,16 @@ static Value copy_value(const Value* src) {
         }
     }
     return dst;
+}
+
+void free_value(void* ptr) {
+    Value* val = (Value*)ptr;
+    if (!val) return;
+    if (val->type == TYPE_STRING && val->char_val) {
+        free(val->char_val);
+        val->char_val = NULL;
+    }
+    val->type = TYPE_NULL;
 }
 
 /* Copies all data from src row to dst row.
@@ -155,21 +156,18 @@ void copy_row(Row* dst, const Row* src, int column_count) {
     /* Ensure dst has enough capacity for src's values */
     if (dst->value_capacity < src->value_count) {
         Value* new_values = realloc(dst->values, src->value_count * sizeof(Value));
-        bool* new_is_null = realloc(dst->is_null, src->value_count * sizeof(bool));
-        if (!new_values || !new_is_null) return;
+        if (!new_values) return;
         dst->values = new_values;
-        dst->is_null = new_is_null;
         dst->value_capacity = src->value_count;
     }
 
     for (int i = 0; i < src->value_count; i++) {
         dst->values[i] = copy_value(&src->values[i]);
-        dst->is_null[i] = src->is_null[i];
     }
     dst->value_count = src->value_count;
 }
 
-static Table* find_table(const char* name) {
+Table* find_table(const char* name) {
     for (int i = 0; i < alist_length(&tables); i++) {
         Table* table = (Table*)alist_get(&tables, i);
         if (table && strcmp(table->name, name) == 0) {
@@ -181,171 +179,315 @@ static Table* find_table(const char* name) {
 
 Table* get_table(const char* name) { return find_table(name); }
 
-void exec_create_table(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_create_table: Creating table: %s",
-            current->create_table.table_def.name);
+Table* get_table_by_id(int table_id) {
+    if (table_id < 0) return NULL;
+    int count = alist_length(&tables);
+    for (int i = 0; i < count; i++) {
+        Table* table = (Table*)alist_get(&tables, i);
+        if (table && table->table_id == table_id) {
+            return table;
+        }
+    }
+    return NULL;
+}
 
-    if (find_table(current->create_table.table_def.name)) {
+void exec_create_table(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_create_table: Creating table: %s", current->create_table.table_name);
+
+    if (find_table(current->create_table.table_name)) {
         log_msg(LOG_ERROR, "exec_create_table: Table '%s' already exists",
-                current->create_table.table_def.name);
+                current->create_table.table_name);
         return;
     }
 
-    Table* table = create_table(current->create_table.table_def.name, 4);
+    Table* table = create_table(current->create_table.table_name, 4);
     if (!table) {
         log_msg(LOG_ERROR, "exec_create_table: Failed to allocate table");
         return;
     }
 
-    table->schema = current->create_table.table_def;
+    table->schema.columns = current->create_table.columns;
+
+    int column_count = alist_length(&table->schema.columns);
+    for (int i = 0; i < column_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, i);
+        if (col && (col->is_primary_key || col->is_unique)) {
+            char index_name[MAX_TABLE_NAME_LEN];
+            size_t prefix_len = 4;
+            memcpy(index_name, "idx_", prefix_len);
+            size_t remaining = sizeof(index_name) - prefix_len - 1;
+            size_t name_len = strlen(table->name);
+            size_t col_len = strlen(col->name);
+            if (name_len + col_len + 1 > remaining) {
+                size_t half = remaining / 2;
+                name_len = half;
+                col_len = half;
+            }
+            memcpy(index_name + prefix_len, table->name, name_len);
+            index_name[prefix_len + name_len] = '_';
+            memcpy(index_name + prefix_len + name_len + 1, col->name, col_len);
+            index_name[prefix_len + name_len + 1 + col_len] = '\0';
+            index_table_column(table->name, col->name, index_name);
+            log_msg(LOG_INFO, "exec_create_table: Created %s index '%s' on column '%s'",
+                    col->is_primary_key ? "PRIMARY KEY" : "UNIQUE", index_name, col->name);
+        }
+    }
 
     log_msg(LOG_INFO, "exec_create_table: Table '%s' created with %d columns", table->name,
-            table->schema.column_count);
+            alist_length(&table->schema.columns));
+}
+
+bool value_equals(const Value* a, const Value* b) {
+    if (a->type != b->type) return false;
+    if (is_null(a) && is_null(b)) return true;
+    if (is_null(a) || is_null(b)) return false;
+
+    switch (a->type) {
+        case TYPE_INT:
+            return a->int_val == b->int_val;
+        case TYPE_FLOAT:
+            return a->float_val == b->float_val;
+        case TYPE_STRING:
+            return strcmp(a->char_val, b->char_val) == 0;
+        default:
+            return false;
+    }
+}
+
+bool check_not_null_constraint(Table* table, int col_idx, Value* val) {
+    ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
+    if (!col) return false;
+    if (!col->nullable && is_null(val)) {
+        log_msg(LOG_ERROR, "Constraint violation: NOT NULL on column '%s'",
+                col->name);
+        return false;
+    }
+    return true;
+}
+
+bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_row_idx) {
+    if (is_null(val)) return true;
+
+    int row_count = alist_length(&table->rows);
+    for (int i = 0; i < row_count; i++) {
+        if (i == exclude_row_idx) continue;
+        Row* row = (Row*)alist_get(&table->rows, i);
+        ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
+        if (row && col && value_equals(&row->values[col_idx], val)) {
+            log_msg(LOG_ERROR, "Constraint violation: UNIQUE on column '%s' (duplicate value '%s')",
+                    col->name, repr(val));
+            return false;
+        }
+    }
+    return true;
+}
+
+bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
+    ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
+    if (!col) return false;
+    if (!col->is_foreign_key || col->references_table[0] == '\0') return true;
+    if (is_null(val)) return true;
+
+    Table* ref_table = find_table(col->references_table);
+    if (!ref_table) {
+        log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY references non-existent table '%s'",
+                col->references_table);
+        return false;
+    }
+
+    int ref_col_idx = -1;
+    if (col->references_column[0] != '\0') {
+        int ref_col_count = alist_length(&ref_table->schema.columns);
+        for (int i = 0; i < ref_col_count; i++) {
+            ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, i);
+            if (ref_col && strcmp(ref_col->name, col->references_column) == 0) {
+                ref_col_idx = i;
+                break;
+            }
+        }
+    } else {
+        ref_col_idx = 0;
+    }
+
+    if (ref_col_idx < 0) {
+        log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY references non-existent column '%s' in table '%s'",
+                col->references_column, col->references_table);
+        return false;
+    }
+
+    int ref_row_count = alist_length(&ref_table->rows);
+    for (int i = 0; i < ref_row_count; i++) {
+        Row* ref_row = (Row*)alist_get(&ref_table->rows, i);
+        ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, ref_col_idx);
+        if (ref_row && ref_col && value_equals(&ref_row->values[ref_col_idx], val)) {
+            return true;
+        }
+    }
+
+    ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, ref_col_idx);
+    log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY on column '%s' (value '%s' not found in %s.%s)",
+            col->name, repr(val), col->references_table, ref_col ? ref_col->name : "unknown");
+    return false;
 }
 
 void exec_insert_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_insert_row: Inserting row into table: %s",
-            current->insert_row.table_name);
+    log_msg(LOG_DEBUG, "exec_insert_row: Inserting row into table ID: %d", current->insert_row.table_id);
 
-    Table* table = find_table(current->insert_row.table_name);
+    Table* table = get_table_by_id(current->insert_row.table_id);
     if (!table) {
-        char suggestion[256];
-        int table_count = alist_length(&tables);
-        const char* table_names[table_count > 0 ? table_count : 1];
-        for (int i = 0; i < table_count; i++) {
-            Table* t = (Table*)alist_get(&tables, i);
-            table_names[i] = t ? t->name : "";
-        }
-        suggest_similar(current->insert_row.table_name, table_names, table_count, suggestion,
-                        sizeof(suggestion));
-        show_prominent_error("Table " COLOR_YELLOW "%s" COLOR_RESET " does not exist!",
-                             current->insert_row.table_name);
-        if (strlen(suggestion) > 0) {
-            printf("  %s\n", suggestion);
-        }
+        log_msg(LOG_ERROR, "exec_insert_row: Table with ID %d does not exist", current->insert_row.table_id);
         return;
     }
 
-    if (current->insert_row.value_count != table->schema.column_count) {
+    int schema_column_count = alist_length(&table->schema.columns);
+    int value_count = alist_length(&current->insert_row.values);
+    if (value_count != schema_column_count) {
         log_msg(LOG_ERROR, "exec_insert_row: Column count mismatch (expected %d, got %d)",
-                table->schema.column_count, current->insert_row.value_count);
+                schema_column_count, value_count);
         return;
     }
 
-    /* Grow the table's row array */
-    if (table->row_count >= table->row_capacity) {
-        if (!resize_table(table, table->row_capacity * 2)) {
-            log_msg(LOG_ERROR, "exec_insert_row: Failed to resize table");
+    Row* row = (Row*)alist_append(&table->rows);
+    if (!row) {
+        log_msg(LOG_ERROR, "exec_insert_row: Failed to allocate row");
+        return;
+    }
+
+    row->value_capacity = value_count;
+    row->values = malloc(row->value_capacity * sizeof(Value));
+    row->value_count = 0;
+
+    if (!row->values) {
+        log_msg(LOG_ERROR, "exec_insert_row: Failed to allocate row data");
+        return;
+    }
+
+    for (int i = 0; i < value_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, i);
+        if (!col) continue;
+        DataType expected_type = col->type;
+        Value* val_ptr = (Value*)alist_get(&current->insert_row.values, i);
+        if (!val_ptr) continue;
+        Value source_val = *val_ptr;
+
+        if (source_val.type != expected_type && source_val.type != TYPE_NULL) {
+            Value converted;
+            if (try_convert_value(&source_val, expected_type, &converted)) {
+                row->values[i] = converted;
+            } else {
+                log_msg(LOG_ERROR,
+                        "exec_insert_row: Type mismatch for column '%s' (expected %s, got %s)",
+                        col->name,
+                        expected_type == TYPE_INT ? "INT" :
+                        expected_type == TYPE_FLOAT ? "FLOAT" :
+                        expected_type == TYPE_STRING ? "STRING" : "UNKNOWN",
+                        source_val.type == TYPE_INT ? "INT" :
+                        source_val.type == TYPE_FLOAT ? "FLOAT" :
+                        source_val.type == TYPE_STRING ? "STRING" : "UNKNOWN");
+                row->values[i] = VAL_NULL;
+            }
+        } else {
+            row->values[i] = copy_value(&source_val);
+        }
+
+        if (!check_not_null_constraint(table, i, &row->values[i])) {
+            log_msg(LOG_ERROR, "exec_insert_row: NOT NULL constraint violated for column '%s'",
+                    col->name);
             return;
         }
-    }
 
-    Row* row = &table->rows[table->row_count];
+        if (col->is_unique) {
+            if (!check_unique_constraint(table, i, &row->values[i], -1)) {
+                log_msg(LOG_ERROR, "exec_insert_row: UNIQUE constraint violated for column '%s'",
+                        col->name);
+                return;
+            }
+        }
 
-    if (row->value_capacity < current->insert_row.value_count) {
-        if (!resize_row(row, current->insert_row.value_count)) {
-            log_msg(LOG_ERROR, "exec_insert_row: Failed to resize row");
-            return;
+        if (col->is_foreign_key) {
+            if (!check_foreign_key_constraint(table, i, &row->values[i])) {
+                log_msg(LOG_ERROR, "exec_insert_row: FOREIGN KEY constraint violated for column '%s'",
+                        col->name);
+                return;
+            }
         }
     }
-
-    for (int i = 0; i < current->insert_row.value_count; i++) {
-        row->values[i] = copy_value(&current->insert_row.values[i]);
-        row->is_null[i] = current->insert_row.values[i].type == TYPE_NULL;
-    }
-    row->value_count = current->insert_row.value_count;
+    row->value_count = value_count;
 
     log_msg(LOG_INFO, "exec_insert_row: Row inserted into table '%s' (row %d)",
-            current->insert_row.table_name, table->row_count + 1);
-    table->row_count++;
+            table->name, alist_length(&table->rows));
 }
 
 void exec_scan_table(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_scan_table: Scanning table: %s", current->scan_table.table_name);
+    log_msg(LOG_DEBUG, "exec_scan_table: Scanning table ID: %d", current->scan_table.table_id);
 
-    Table* table = find_table(current->scan_table.table_name);
+    Table* table = get_table_by_id(current->scan_table.table_id);
     if (!table) {
-        char suggestion[256];
-        int table_count = alist_length(&tables);
-        const char* table_names[table_count > 0 ? table_count : 1];
-        for (int i = 0; i < table_count; i++) {
-            Table* t = (Table*)alist_get(&tables, i);
-            table_names[i] = t ? t->name : "";
-        }
-        suggest_similar(current->scan_table.table_name, table_names, table_count, suggestion,
-                        sizeof(suggestion));
-        show_prominent_error("Table " COLOR_YELLOW "%s" COLOR_RESET " does not exist",
-                             current->scan_table.table_name);
-        if (strlen(suggestion) > 0) {
-            printf("  %s\n", suggestion);
-        }
+        log_msg(LOG_ERROR, "exec_scan_table: Table with ID %d does not exist", current->scan_table.table_id);
         return;
     }
 }
 
 void exec_drop_table(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_drop_table: Dropping table: %s", current->drop_table.table_name);
+    log_msg(LOG_DEBUG, "exec_drop_table: Dropping table ID: %d", current->drop_table.table_id);
+
+    Table* table = get_table_by_id(current->drop_table.table_id);
+    if (!table) {
+        log_msg(LOG_ERROR, "exec_drop_table: Table with ID %d does not exist", current->drop_table.table_id);
+        return;
+    }
 
     int table_index = -1;
     int table_count = alist_length(&tables);
     for (int i = 0; i < table_count; i++) {
         Table* t = (Table*)alist_get(&tables, i);
-        if (t && strcmp(t->name, current->drop_table.table_name) == 0) {
+        if (t && t->table_id == current->drop_table.table_id) {
             table_index = i;
             break;
         }
     }
 
     if (table_index < 0) {
-        char suggestion[256];
-        const char* table_names[table_count > 0 ? table_count : 1];
-        for (int i = 0; i < table_count; i++) {
-            Table* t = (Table*)alist_get(&tables, i);
-            table_names[i] = t ? t->name : "";
-        }
-        suggest_similar(current->drop_table.table_name, table_names, table_count, suggestion,
-                        sizeof(suggestion));
-        show_prominent_error("Table " COLOR_YELLOW "%s" COLOR_RESET " does not exist",
-                             current->drop_table.table_name);
-        if (strlen(suggestion) > 0) {
-            printf("  %s\n", suggestion);
-        }
+        log_msg(LOG_ERROR, "exec_drop_table: Table with ID %d not found in tables list", current->drop_table.table_id);
         return;
     }
 
     alist_remove(&tables, table_index);
 
-    log_msg(LOG_INFO, "exec_drop_table: Table '%s' dropped", current->drop_table.table_name);
+    log_msg(LOG_INFO, "exec_drop_table: Table '%s' dropped", table->name);
 }
 
 void print_table_header(const TableDef* schema) {
+    int column_count = alist_length(&schema->columns);
     printf("┌");
-    for (int i = 0; i < schema->column_count; i++) {
+    for (int i = 0; i < column_count; i++) {
         for (int j = 0; j < 20; j++) {
             printf("─");
         }
-        if (i < schema->column_count - 1) {
+        if (i < column_count - 1) {
             printf("┬");
         }
     }
     printf("┐\n");
 
     printf("│");
-    for (int i = 0; i < schema->column_count; i++) {
-        int len = strlen(schema->columns[i].name);
+    for (int i = 0; i < column_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&schema->columns, i);
+        if (!col) continue;
+        int len = strlen(col->name);
         int padding = 20 - len;
         int left_pad = padding / 2;
-        printf("%*s%s%*s", left_pad, "", schema->columns[i].name, 20 - left_pad - len, "");
+        printf("%*s%s%*s", left_pad, "", col->name, 20 - left_pad - len, "");
         printf("│");
     }
     printf("\n");
 
     printf("├");
-    for (int i = 0; i < schema->column_count; i++) {
+    for (int i = 0; i < column_count; i++) {
         for (int j = 0; j < 20; j++) {
             printf("─");
         }
-        if (i < schema->column_count - 1) {
+        if (i < column_count - 1) {
             printf("┼");
         }
     }
@@ -366,9 +508,10 @@ void print_table_separator(int column_count) {
 }
 
 void print_row_data(const Row* row, const TableDef* schema) {
+    int column_count = alist_length(&schema->columns);
     printf("│");
-    for (int col_idx = 0; col_idx < schema->column_count; col_idx++) {
-        if (row->is_null[col_idx]) {
+    for (int col_idx = 0; col_idx < column_count; col_idx++) {
+        if (row->values[col_idx].type == TYPE_NULL) {
             printf("%9s%10s", "", "NULL");
         } else {
             const char* val_str = repr(&row->values[col_idx]);
@@ -386,4 +529,210 @@ void init_tables(void) {
     if (tables.data == NULL) {
         alist_init(&tables, sizeof(Table), free_table_internal);
     }
+    if (indexes.data == NULL) {
+        alist_init(&indexes, sizeof(Index), free_index);
+    }
+}
+
+/* Hash function for Values - used by index implementation.
+ * Converts a Value to a hash code for bucket indexing.
+ * Returns a value between 0 and bucket_count-1. */
+int hash_value(const Value* value, int bucket_count) {
+    if (!value || bucket_count <= 0) return 0;
+
+    unsigned long hash = 0;
+    switch (value->type) {
+        case TYPE_INT:
+            hash = (unsigned long)(value->int_val);
+            break;
+        case TYPE_FLOAT:
+            hash = (unsigned long)(value->float_val * 1000.0);
+            break;
+        case TYPE_STRING:
+            if (value->char_val) {
+                const char* p = value->char_val;
+                while (*p) {
+                    hash = hash * 31 + *p++;
+                }
+            }
+            break;
+        case TYPE_TIME:
+            hash = value->time_val.time_val;
+            break;
+        case TYPE_DATE:
+            hash = value->date_val.date_val;
+            break;
+        default:
+            hash = 0;
+    }
+
+    return (int)(hash % (unsigned long)bucket_count);
+}
+
+/* Free an index entry */
+static void free_index_entry(IndexEntry* entry) {
+    if (!entry) return;
+
+    if (entry->key.type == TYPE_STRING && entry->key.char_val) {
+        free(entry->key.char_val);
+    }
+    free_index_entry(entry->next);
+    free(entry);
+}
+
+/* Free an index structure and all its entries */
+static void free_index(void* ptr) {
+    Index* index = (Index*)ptr;
+    if (!index) return;
+
+    if (index->buckets) {
+        for (int i = 0; i < index->bucket_count; i++) {
+            if (index->buckets[i]) {
+                free_index_entry(index->buckets[i]);
+            }
+        }
+        free(index->buckets);
+    }
+    log_msg(LOG_DEBUG, "free_index: Index '%s' freed", index->index_name);
+}
+
+/* Find an index by name */
+Index* find_index(const char* index_name) {
+    if (!index_name) return NULL;
+
+    int index_count = alist_length(&indexes);
+    for (int i = 0; i < index_count; i++) {
+        Index* idx = (Index*)alist_get(&indexes, i);
+        if (idx && strcmp(idx->index_name, index_name) == 0) {
+            return idx;
+        }
+    }
+    return NULL;
+}
+
+/* Create an index on a table column */
+void index_table_column(const char* table_name, const char* column_name, const char* index_name) {
+    if (!table_name || !column_name) return;
+
+    Table* table = get_table(table_name);
+    if (!table) {
+        log_msg(LOG_ERROR, "index_table_column: Table '%s' not found", table_name);
+        return;
+    }
+
+    int column_idx = -1;
+    int column_count = alist_length(&table->schema.columns);
+    for (int i = 0; i < column_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, i);
+        if (col && strcasecmp(col->name, column_name) == 0) {
+            column_idx = i;
+            break;
+        }
+    }
+
+    if (column_idx < 0) {
+        log_msg(LOG_ERROR, "index_table_column: Column '%s' not found in table '%s'",
+                column_name, table_name);
+        return;
+    }
+
+    char idx_name[MAX_TABLE_NAME_LEN];
+    if (index_name && index_name[0] != '\0') {
+        snprintf(idx_name, sizeof(idx_name), "%s", index_name);
+    } else {
+        snprintf(idx_name, sizeof(idx_name), "idx_%s_%s", table_name, column_name);
+    }
+
+    Index* existing = find_index(idx_name);
+    if (existing) {
+        log_msg(LOG_INFO, "index_table_column: Index '%s' already exists, rebuilding", idx_name);
+        int index_count = alist_length(&indexes);
+        for (int i = 0; i < index_count; i++) {
+            Index* idx = (Index*)alist_get(&indexes, i);
+            if (idx && strcmp(idx->index_name, idx_name) == 0) {
+                alist_remove(&indexes, i);
+                break;
+            }
+        }
+    }
+
+    Index* index = (Index*)malloc(sizeof(Index));
+    if (!index) {
+        log_msg(LOG_ERROR, "index_table_column: Failed to allocate index");
+        return;
+    }
+
+    memset(index, 0, sizeof(Index));
+    snprintf(index->index_name, sizeof(index->index_name), "%s", idx_name);
+    snprintf(index->table_name, sizeof(index->table_name), "%s", table_name);
+    snprintf(index->column_name, sizeof(index->column_name), "%s", column_name);
+    index->bucket_count = 64;
+    index->buckets = calloc(index->bucket_count, sizeof(IndexEntry*));
+    index->entry_count = 0;
+
+    if (!index->buckets) {
+        log_msg(LOG_ERROR, "index_table_column: Failed to allocate index buckets");
+        free(index);
+        return;
+    }
+
+    int row_count = alist_length(&table->rows);
+    for (int i = 0; i < row_count; i++) {
+        Row* row = (Row*)alist_get(&table->rows, i);
+        if (!row || row->value_count <= column_idx) continue;
+
+        IndexEntry* entry = malloc(sizeof(IndexEntry));
+        if (!entry) continue;
+
+        entry->key = copy_value(&row->values[column_idx]);
+        entry->row_index = i;
+        entry->next = NULL;
+
+        int bucket = hash_value(&entry->key, index->bucket_count);
+        entry->next = index->buckets[bucket];
+        index->buckets[bucket] = entry;
+        index->entry_count++;
+    }
+
+    Index* stored = (Index*)alist_append(&indexes);
+    *stored = *index;
+
+    log_msg(LOG_INFO, "index_table_column: Created index '%s' on '%s.%s' with %d entries",
+            index_name, table_name, column_name, index->entry_count);
+}
+
+/* Drop an index by name */
+void drop_index_by_name(const char* index_name) {
+    if (!index_name) return;
+
+    int index_count = alist_length(&indexes);
+    for (int i = 0; i < index_count; i++) {
+        Index* idx = (Index*)alist_get(&indexes, i);
+        if (idx && strcmp(idx->index_name, index_name) == 0) {
+            alist_remove(&indexes, i);
+            log_msg(LOG_INFO, "drop_index_by_name: Index '%s' dropped", index_name);
+            return;
+        }
+    }
+
+    log_msg(LOG_ERROR, "drop_index_by_name: Index '%s' not found", index_name);
+}
+
+void exec_create_index(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_create_index: Creating index '%s' on table ID %d column '%s'",
+            current->create_index.index_name, current->create_index.table_id, current->create_index.column_name);
+
+    Table* table = get_table_by_id(current->create_index.table_id);
+    if (!table) {
+        log_msg(LOG_ERROR, "exec_create_index: Table with ID %d does not exist", current->create_index.table_id);
+        return;
+    }
+
+    index_table_column(table->name, current->create_index.column_name, current->create_index.index_name);
+}
+
+void exec_drop_index(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_drop_index: Dropping index '%s'", current->drop_index.index_name);
+
+    drop_index_by_name(current->drop_index.index_name);
 }

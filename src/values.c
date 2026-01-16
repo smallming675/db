@@ -10,6 +10,94 @@
 const Value VAL_NULL = {.type = TYPE_NULL};
 const Value VAL_ERROR = {.type = TYPE_ERROR};
 
+int time_hour(unsigned int time_val) { return (time_val >> 12) & 0xFF; }
+int time_minute(unsigned int time_val) { return (time_val >> 6) & 0x3F; }
+int time_second(unsigned int time_val) { return time_val & 0x3F; }
+int date_year(unsigned int date_val) { return (date_val >> 9) & 0x3FFFFF; }
+int date_month(unsigned int date_val) { return (date_val >> 5) & 0xF; }
+int date_day(unsigned int date_val) { return date_val & 0x1F; }
+
+static Value convert_value_impl(const Value* val, DataType target_type, bool* success) {
+    Value result;
+    *success = true;
+
+    if (val->type == TYPE_NULL) {
+        result.type = target_type;
+        return result;
+    }
+
+    if (val->type == target_type) {
+        return *val;
+    }
+
+    switch (target_type) {
+        case TYPE_INT:
+            if (val->type == TYPE_FLOAT) {
+                result.type = TYPE_INT;
+                result.int_val = (int)val->float_val;
+            } else if (val->type == TYPE_STRING) {
+                result.type = TYPE_INT;
+                result.int_val = atoi(val->char_val);
+            } else {
+                *success = false;
+                result.type = TYPE_ERROR;
+            }
+            break;
+
+        case TYPE_FLOAT:
+            if (val->type == TYPE_INT) {
+                result.type = TYPE_FLOAT;
+                result.float_val = (double)val->int_val;
+            } else if (val->type == TYPE_STRING) {
+                result.type = TYPE_FLOAT;
+                result.float_val = atof(val->char_val);
+            } else {
+                *success = false;
+                result.type = TYPE_ERROR;
+            }
+            break;
+
+        case TYPE_STRING:
+            result.type = TYPE_STRING;
+            switch (val->type) {
+                case TYPE_INT:
+                    result.char_val = malloc(32);
+                    snprintf(result.char_val, 32, "%d", val->int_val);
+                    break;
+                case TYPE_FLOAT:
+                    result.char_val = malloc(64);
+                    snprintf(result.char_val, 64, "%.2f", val->float_val);
+                    break;
+                case TYPE_STRING:
+                    result.char_val = malloc(strlen(val->char_val) + 1);
+                    strcpy(result.char_val, val->char_val);
+                    break;
+                default:
+                    *success = false;
+                    result.type = TYPE_ERROR;
+            }
+            break;
+
+        default:
+            *success = false;
+            result.type = TYPE_ERROR;
+            break;
+    }
+
+    return result;
+}
+
+Value convert_value(const Value* val, DataType target_type) {
+    bool success;
+    return convert_value_impl(val, target_type, &success);
+}
+
+bool try_convert_value(const Value* val, DataType target_type, Value* out_result) {
+    bool success;
+    *out_result = convert_value_impl(val, target_type, &success);
+    return success;
+}
+
 bool is_null(const Value* val) {
     if (!val) return true;
     if (val->type == TYPE_ERROR) {
@@ -41,12 +129,12 @@ const char* repr(const Value* val) {
             buffer[MAX_STRING_LEN - 1] = '\0';
             break;
         case TYPE_TIME:
-            snprintf(buffer, MAX_STRING_LEN, "%02d:%02d:%02d", val->time_val.hour,
-                     val->time_val.minute, val->time_val.second);
+            snprintf(buffer, MAX_STRING_LEN, "%02d:%02d:%02d",
+                     time_hour(val->time_val.time_val), time_minute(val->time_val.time_val), time_second(val->time_val.time_val));
             break;
         case TYPE_DATE:
-            snprintf(buffer, MAX_STRING_LEN, "%04d-%02d-%02d", val->date_val.year,
-                     val->date_val.month, val->date_val.day);
+            snprintf(buffer, MAX_STRING_LEN, "%04d-%02d-%02d",
+                     date_year(val->date_val.date_val), date_month(val->date_val.date_val), date_day(val->date_val.date_val));
             break;
         case TYPE_ERROR:
             strcpy(buffer, "ERROR");
@@ -166,33 +254,37 @@ bool eval_comparison(Value left, Value right, OperatorType op) {
 
 
 void update_aggregate_state(AggState* state, const Value* val,
-                                   const IRAggregate* agg) {
+                                    const IRAggregate* agg) {
     if (is_null(val)) {
         return;  // Skip NULL values
     }
 
     if (agg->distinct) {
-        for (int i = 0; i < state->distinct_count; i++) {
-            if (state->seen_values[i] && compare_values(val, (Value*)state->seen_values[i]) == 0) {
+        int seen_count = alist_length(&state->seen_values);
+        for (int i = 0; i < seen_count; i++) {
+            char* seen = (char*)alist_get(&state->seen_values, i);
+            if (seen && compare_values(val, (Value*)seen) == 0) {
                 return;  // Skip duplicate
             }
         }
-        if (state->distinct_count < MAX_ROWS) {
-            const char* char_val = val->char_val;
-            if (val->type == TYPE_INT) {
-                static char int_buf[32];
-                snprintf(int_buf, sizeof(int_buf), "%d", val->int_val);
-                char_val = int_buf;
-            } else if (val->type == TYPE_FLOAT) {
-                static char float_buf[32];
-                snprintf(float_buf, sizeof(float_buf), "%.6f", val->float_val);
-                char_val = float_buf;
-            }
-            char* val_copy = malloc(strlen(char_val) + 1);
-            if (val_copy) {
-                strcpy(val_copy, char_val);
-                state->seen_values[state->distinct_count] = val_copy;
-                state->distinct_count++;
+        const char* char_val = val->char_val;
+        if (val->type == TYPE_INT) {
+            static char int_buf[32];
+            snprintf(int_buf, sizeof(int_buf), "%d", val->int_val);
+            char_val = int_buf;
+        } else if (val->type == TYPE_FLOAT) {
+            static char float_buf[32];
+            snprintf(float_buf, sizeof(float_buf), "%.6f", val->float_val);
+            char_val = float_buf;
+        }
+        char* val_copy = malloc(strlen(char_val) + 1);
+        if (val_copy) {
+            strcpy(val_copy, char_val);
+            char** appended = (char**)alist_append(&state->seen_values);
+            if (appended) {
+                *appended = val_copy;
+            } else {
+                free(val_copy);
             }
         }
     }
