@@ -8,7 +8,7 @@ extern ArrayList tables;
 
 Table* find_table(const char* name);
 Table* get_table(const char* name);
-Table* get_table_by_id(int table_id);
+Table* get_table_by_id(uint8_t table_id);
 void exec_create_table(const IRNode* current);
 void exec_insert_row(const IRNode* current);
 void exec_scan_table(const IRNode* current);

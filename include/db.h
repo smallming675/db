@@ -2,19 +2,20 @@
 #define DB_H
 
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
+#include <stdint.h>
 #include "arraylist.h"
 
 #define MAX_TABLES 32
-#define MAX_TOKEN_LEN 256
+#define MAX_ROWS 1000
+#define MAX_TOKEN_LEN 64
 #define MAX_TABLE_NAME_LEN 64
 #define MAX_COLUMN_NAME_LEN 64
-#define MAX_COLUMNS 32
-#define MAX_ROWS 1000
 #define MAX_STRING_LEN 256
+
+#define COL_FLAG_NULLABLE      (1 << 0)
+#define COL_FLAG_PRIMARY_KEY   (1 << 1)
+#define COL_FLAG_UNIQUE        (1 << 2)
+#define COL_FLAG_FOREIGN_KEY   (1 << 3)
 
 typedef enum {
   TOKEN_KEYWORD,
@@ -52,8 +53,16 @@ typedef enum {
   TOKEN_KEY,
   TOKEN_REFERENCES,
   TOKEN_NULL,
-  TOKEN_UNIQUE
+  TOKEN_UNIQUE,
+  TOKEN_JOIN,
+  TOKEN_INNER,
+  TOKEN_LEFT
 } TokenType;
+
+typedef struct {
+  const char* name;
+  TokenType type;
+} KeywordMap;
 
 typedef struct {
   TokenType type;
@@ -83,10 +92,7 @@ typedef struct {
   char references_table[MAX_TABLE_NAME_LEN];
   char references_column[MAX_COLUMN_NAME_LEN];
   DataType type;
-  bool nullable;
-  bool is_primary_key;
-  bool is_unique;
-  bool is_foreign_key;
+  unsigned int flags;
 } ColumnDef;
 
 typedef struct {
@@ -126,17 +132,6 @@ typedef struct {
   ParseError error;
   bool error_occurred;
 } ParseContext;
-
-typedef enum {
-  AST_CREATE_TABLE,
-  AST_INSERT_ROW,
-  AST_SELECT,
-  AST_DROP_TABLE,
-  AST_UPDATE_ROW,
-  AST_DELETE_ROW,
-  AST_CREATE_INDEX,
-  AST_DROP_INDEX
-} ASTType;
 
 typedef struct {
   DataType type;
@@ -238,49 +233,78 @@ typedef struct Expr {
   };
 } Expr;
 
+typedef enum {
+  JOIN_NONE,
+  JOIN_INNER,
+  JOIN_LEFT
+} JoinType;
+
+typedef struct {
+  int left_table_id;
+  int right_table_id;
+  JoinType type;
+  Expr* condition;
+} JoinNode;
+
+typedef enum {
+  AST_CREATE_TABLE,
+  AST_INSERT_ROW,
+  AST_SELECT,
+  AST_DROP_TABLE,
+  AST_UPDATE_ROW,
+  AST_DELETE_ROW,
+  AST_CREATE_INDEX,
+  AST_DROP_INDEX,
+  AST_JOIN
+} ASTType;
+
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
   ArrayList columns;
 } CreateTableNode;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   ArrayList values;
 } InsertNode;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   ArrayList expressions;
   Expr *where_clause;
   ArrayList order_by;
   ArrayList order_by_desc;
   int order_by_count;
   int limit;
+  JoinType join_type;
+  int join_table_id;
+  char join_table_name[MAX_TABLE_NAME_LEN];
+  Expr *join_condition;
 } SelectNode;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
 } DropTableNode;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   char column_name[MAX_COLUMN_NAME_LEN];
   char index_name[MAX_TABLE_NAME_LEN];
 } CreateIndexNode;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   char index_name[MAX_TABLE_NAME_LEN];
 } DropIndexNode;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   ArrayList values;
   Expr *where_clause;
 } UpdateNode;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   Expr *where_clause;
 } DeleteNode;
 
@@ -295,6 +319,7 @@ typedef struct ASTNode {
     DeleteNode delete;
     CreateIndexNode create_index;
     DropIndexNode drop_index;
+    JoinNode join;
   };
   struct ASTNode *next;
 } ASTNode;
@@ -311,7 +336,8 @@ typedef enum {
   IR_PROJECT,
   IR_SORT,
   IR_CREATE_INDEX,
-  IR_DROP_INDEX
+  IR_DROP_INDEX,
+  IR_JOIN
 } IRType;
 
 typedef struct {
@@ -320,36 +346,36 @@ typedef struct {
 } IRCreateTable;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   ArrayList values;
 } IRInsertRow;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
 } IRScanTable;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
 } IRDropTable;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   ArrayList values;
   Expr *where_clause;
 } IRUpdateRow;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   Expr *where_clause;
 } IRDeleteRow;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   Expr *filter_expr;
 } IRFilter;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   AggFuncType func_type;
   Expr *operand;
   bool distinct;
@@ -357,27 +383,34 @@ typedef struct {
 } IRAggregate;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   ArrayList expressions;
   int limit;
 } IRProject;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   ArrayList order_by;
   ArrayList order_by_desc;
 } IRSort;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   char column_name[MAX_COLUMN_NAME_LEN];
   char index_name[MAX_TABLE_NAME_LEN];
 } IRCreateIndex;
 
 typedef struct {
-  int table_id;
+  uint8_t table_id;
   char index_name[MAX_TABLE_NAME_LEN];
 } IRDropIndex;
+
+typedef struct {
+  int left_table_id;
+  int right_table_id;
+  JoinType type;
+  Expr* condition;
+} IRJoin;
 
 typedef struct IRNode {
   IRType type;
@@ -394,6 +427,7 @@ typedef struct IRNode {
     IRSort sort;
     IRCreateIndex create_index;
     IRDropIndex drop_index;
+    IRJoin join;
   };
   struct IRNode *next;
 } IRNode;
@@ -406,7 +440,7 @@ typedef struct Row {
 
 typedef struct {
   char name[MAX_TABLE_NAME_LEN];
-  int table_id;
+  uint8_t table_id;
   TableDef schema;
   ArrayList rows;
 } Table;

@@ -160,6 +160,12 @@ const char* token_type_name(TokenType type) {
             return "NULL";
         case TOKEN_UNIQUE:
             return "UNIQUE";
+        case TOKEN_JOIN:
+            return "JOIN";
+        case TOKEN_INNER:
+            return "INNER";
+        case TOKEN_LEFT:
+            return "LEFT";
         default:
             return "UNKNOWN";
     }
@@ -655,28 +661,24 @@ static bool parse_column_def(ParseContext* ctx, ColumnDef* col) {
     col->name[MAX_COLUMN_NAME_LEN - 1] = '\0';
     advance();
     col->type = parse_data_type(ctx);
-    col->nullable = true;
-    col->is_primary_key = false;
-    col->is_unique = false;
-    col->is_foreign_key = false;
+    col->flags = COL_FLAG_NULLABLE;
     col->references_table[0] = '\0';
     col->references_column[0] = '\0';
 
     while (current_token->type != TOKEN_COMMA && current_token->type != TOKEN_RPAREN &&
            current_token->type != TOKEN_SEMICOLON) {
         if (current_token->type == TOKEN_NOT && current_token[1].type == TOKEN_NULL) {
-            col->nullable = false;
+            col->flags &= ~COL_FLAG_NULLABLE;
             log_msg(LOG_DEBUG, "parse_column_def: Column '%s' NOT NULL", col->name);
             advance();
             advance();
         } else if (current_token->type == TOKEN_UNIQUE) {
-            col->is_unique = true;
+            col->flags |= COL_FLAG_UNIQUE;
             log_msg(LOG_DEBUG, "parse_column_def: Column '%s' UNIQUE", col->name);
             advance();
         } else if (current_token->type == TOKEN_PRIMARY && current_token[1].type == TOKEN_KEY) {
-            col->is_primary_key = true;
-            col->is_unique = true;
-            col->nullable = false;
+            col->flags |= COL_FLAG_PRIMARY_KEY | COL_FLAG_UNIQUE;
+            col->flags &= ~COL_FLAG_NULLABLE;
             log_msg(LOG_DEBUG, "parse_column_def: Column '%s' PRIMARY KEY", col->name);
             advance();
             advance();
@@ -720,7 +722,7 @@ static bool parse_column_def(ParseContext* ctx, ColumnDef* col) {
                             return false;
                         }
                     }
-                    col->is_foreign_key = true;
+                    col->flags |= COL_FLAG_FOREIGN_KEY;
                     log_msg(LOG_DEBUG, "parse_column_def: Column '%s' FOREIGN KEY REFERENCES %s.%s",
                             col->name, col->references_table, col->references_column);
                 } else {
@@ -1541,8 +1543,61 @@ static ASTNode* parse_select(ParseContext* ctx) {
     const char* table_name = current_token[-1].value;
     Table* table = find_table(table_name);
     node->select.table_id = table ? table->table_id : -1;
+    node->select.join_type = JOIN_NONE;
+    node->select.join_table_id = -1;
+    node->select.join_condition = NULL;
 
     log_msg(LOG_DEBUG, "parse_select: Table name = '%s', table_id = %d", table_name, node->select.table_id);
+
+    if (match(TOKEN_JOIN)) {
+        log_msg(LOG_DEBUG, "parse_select: Found JOIN keyword");
+        advance();
+
+        node->select.join_type = JOIN_INNER;
+        if (match(TOKEN_LEFT)) {
+            node->select.join_type = JOIN_LEFT;
+            advance();
+        } else if (match(TOKEN_INNER)) {
+            advance();
+        }
+
+        if (!match(TOKEN_IDENTIFIER)) {
+            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected table name after JOIN",
+                            "table name (IDENTIFIER)",
+                            current_token->type == TOKEN_EOF ? "end of input" : token_type_name(current_token->type),
+                            "Use: SELECT ... FROM table1 JOIN table2 ON condition\n"
+                            "     SELECT ... FROM table1 INNER JOIN table2 ON condition\n"
+                            "     SELECT ... FROM table1 LEFT JOIN table2 ON condition");
+            free(node);
+            return NULL;
+        }
+
+        const char* join_table_name = current_token->value;
+        Table* join_table = find_table(join_table_name);
+        node->select.join_table_id = join_table ? join_table->table_id : -1;
+        size_t len = strlen(join_table_name);
+        if (len >= MAX_TABLE_NAME_LEN) len = MAX_TABLE_NAME_LEN - 1;
+        memcpy(node->select.join_table_name, join_table_name, len);
+        node->select.join_table_name[len] = '\0';
+        advance();
+
+        if (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "ON") != 0) {
+            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'ON' keyword after JOIN table",
+                            "ON keyword",
+                            current_token->type == TOKEN_EOF ? "end of input" : token_type_name(current_token->type),
+                            "Use: SELECT ... FROM table1 JOIN table2 ON condition");
+            free(node);
+            return NULL;
+        }
+        advance();
+
+        node->select.join_condition = parse_or_expr(ctx);
+        if (!node->select.join_condition) {
+            log_msg(LOG_ERROR, "parse_select: Failed to parse JOIN condition");
+            free(node);
+            return NULL;
+        }
+    }
 
     node->select.where_clause = parse_where_clause(ctx);
     node->select.order_by_count = 0;

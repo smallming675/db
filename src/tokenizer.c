@@ -15,11 +15,6 @@ static bool is_operator_char(char c) {
 }
 
 typedef struct {
-    const char* name;
-    TokenType type;
-} KeywordMap;
-
-typedef struct {
     const char* op;
     TokenType type;
 } OperatorMap;
@@ -83,7 +78,10 @@ static const KeywordMap keywords[] = {{"CREATE", TOKEN_KEYWORD},
                                        {"REFERENCES", TOKEN_REFERENCES},
                                        {"NULL", TOKEN_NULL},
                                        {"UNIQUE", TOKEN_UNIQUE},
-                                       {"FOREIGN", TOKEN_KEYWORD} };
+                                       {"FOREIGN", TOKEN_KEYWORD},
+                                       {"JOIN", TOKEN_JOIN},
+                                       {"INNER", TOKEN_INNER},
+                                       {"LEFT", TOKEN_LEFT} };
 
 static const OperatorMap operators[] = {{"==", TOKEN_EQUALS},     {"!=", TOKEN_NOT_EQUALS},
                                         {"<=", TOKEN_LESS_EQUAL}, {">=", TOKEN_GREATER_EQUAL},
@@ -284,10 +282,9 @@ Token* tokenize(const char* input) {
             alist_length(&tokens));
 
     int token_count = alist_length(&tokens);
-    Token* result = malloc(token_count * sizeof(Token));
-    if (result) {
-        memcpy(result, tokens.data, token_count * sizeof(Token));
-    }
+    Token* result = realloc(tokens.data, token_count * sizeof(Token));
+    if (!result) result = tokens.data;
+    tokens.data = NULL;
     alist_destroy(&tokens);
     return result;
 }

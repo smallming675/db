@@ -110,6 +110,8 @@ IRNode* ast_to_ir(ASTNode* ast) {
             case AST_SELECT: {
                 int table_id = current->select.table_id;
                 int expr_count = alist_length(&current->select.expressions);
+                int join_table_id = current->select.join_table_id;
+                bool has_join = (current->select.join_type != JOIN_NONE && join_table_id >= 0);
 
                 bool has_aggregates = false;
                 for (int i = 0; i < expr_count; i++) {
@@ -120,41 +122,44 @@ IRNode* ast_to_ir(ASTNode* ast) {
                     }
                 }
 
-                if (has_aggregates) {
+                if (has_join) {
                     new_ir->type = IR_SCAN_TABLE;
                     new_ir->scan_table.table_id = table_id;
 
                     IRNode* current_ir = new_ir;
-                    if (current->select.where_clause) {
-                        IRNode* filter_ir = malloc(sizeof(IRNode));
-                        if (filter_ir) {
-                            filter_ir->type = IR_FILTER;
-                            filter_ir->filter.table_id = table_id;
-                            filter_ir->filter.filter_expr = copy_expr(current->select.where_clause);
-                            filter_ir->next = NULL;
-                            current_ir->next = filter_ir;
-                            current_ir = filter_ir;
-                        }
+
+                    IRNode* join_ir = malloc(sizeof(IRNode));
+                    if (join_ir) {
+                        join_ir->type = IR_JOIN;
+                        join_ir->join.left_table_id = table_id;
+                        join_ir->join.right_table_id = join_table_id;
+                        join_ir->join.type = current->select.join_type;
+                        join_ir->join.condition = current->select.join_condition ? copy_expr(current->select.join_condition) : NULL;
+                        join_ir->next = NULL;
+                        current_ir->next = join_ir;
+                        current_ir = join_ir;
                     }
 
-                    IRNode* aggregate_ir = malloc(sizeof(IRNode));
-                    if (aggregate_ir) {
-                        aggregate_ir->type = IR_AGGREGATE;
-                        aggregate_ir->aggregate.table_id = table_id;
-                        if (expr_count > 0) {
-                            Expr** expr_ptr = (Expr**)alist_get(&current->select.expressions, 0);
-                            Expr* agg_expr = expr_ptr ? *expr_ptr : NULL;
-                            if (agg_expr && agg_expr->type == EXPR_AGGREGATE_FUNC) {
-                                aggregate_ir->aggregate.func_type = agg_expr->aggregate.func_type;
-                                aggregate_ir->aggregate.operand = copy_expr(agg_expr->aggregate.operand);
-                                agg_expr->aggregate.operand = NULL;
-                                aggregate_ir->aggregate.distinct = agg_expr->aggregate.distinct;
-                                aggregate_ir->aggregate.count_all = agg_expr->aggregate.count_all;
+                    if (has_aggregates) {
+                        IRNode* aggregate_ir = malloc(sizeof(IRNode));
+                        if (aggregate_ir) {
+                            aggregate_ir->type = IR_AGGREGATE;
+                            aggregate_ir->aggregate.table_id = table_id;
+                            if (expr_count > 0) {
+                                Expr** expr_ptr = (Expr**)alist_get(&current->select.expressions, 0);
+                                Expr* agg_expr = expr_ptr ? *expr_ptr : NULL;
+                                if (agg_expr && agg_expr->type == EXPR_AGGREGATE_FUNC) {
+                                    aggregate_ir->aggregate.func_type = agg_expr->aggregate.func_type;
+                                    aggregate_ir->aggregate.operand = copy_expr(agg_expr->aggregate.operand);
+                                    agg_expr->aggregate.operand = NULL;
+                                    aggregate_ir->aggregate.distinct = agg_expr->aggregate.distinct;
+                                    aggregate_ir->aggregate.count_all = agg_expr->aggregate.count_all;
+                                }
                             }
+                            aggregate_ir->next = NULL;
+                            current_ir->next = aggregate_ir;
+                            current_ir = aggregate_ir;
                         }
-                        aggregate_ir->next = NULL;
-                        current_ir->next = aggregate_ir;
-                        current_ir = aggregate_ir;
                     }
 
                     IRNode* project_ir = malloc(sizeof(IRNode));
@@ -173,70 +178,134 @@ IRNode* ast_to_ir(ASTNode* ast) {
                         project_ir->next = NULL;
                         current_ir->next = project_ir;
                     }
-
                 } else {
-                    new_ir->type = IR_SCAN_TABLE;
-                    new_ir->scan_table.table_id = table_id;
+                    if (has_aggregates) {
+                        new_ir->type = IR_SCAN_TABLE;
+                        new_ir->scan_table.table_id = table_id;
 
-                    IRNode* current_ir = new_ir;
-
-                    if (current->select.where_clause) {
-                        IRNode* filter_ir = malloc(sizeof(IRNode));
-                        if (filter_ir) {
-                            filter_ir->type = IR_FILTER;
-                            filter_ir->filter.table_id = table_id;
-                            filter_ir->filter.filter_expr = copy_expr(current->select.where_clause);
-                            filter_ir->next = NULL;
-                            current_ir->next = filter_ir;
-                            current_ir = filter_ir;
+                        IRNode* current_ir = new_ir;
+                        if (current->select.where_clause) {
+                            IRNode* filter_ir = malloc(sizeof(IRNode));
+                            if (filter_ir) {
+                                filter_ir->type = IR_FILTER;
+                                filter_ir->filter.table_id = table_id;
+                                filter_ir->filter.filter_expr = copy_expr(current->select.where_clause);
+                                filter_ir->next = NULL;
+                                current_ir->next = filter_ir;
+                                current_ir = filter_ir;
+                            }
                         }
-                    }
 
-                    int order_by_count = alist_length(&current->select.order_by);
-                    IRNode* sort_ir = NULL;
-                    if (order_by_count > 0) {
-                        log_msg(LOG_DEBUG, "ast_to_ir: Adding SORT node for %d order_by columns",
-                                order_by_count);
-                        sort_ir = malloc(sizeof(IRNode));
-                        if (sort_ir) {
-                            sort_ir->type = IR_SORT;
-                            sort_ir->sort.table_id = table_id;
-                            alist_init(&sort_ir->sort.order_by, sizeof(Expr*), NULL);
-                            alist_init(&sort_ir->sort.order_by_desc, sizeof(bool), NULL);
-                            for (int i = 0; i < order_by_count; i++) {
-                                Expr** expr_ptr = (Expr**)alist_get(&current->select.order_by, i);
+                        IRNode* aggregate_ir = malloc(sizeof(IRNode));
+                        if (aggregate_ir) {
+                            aggregate_ir->type = IR_AGGREGATE;
+                            aggregate_ir->aggregate.table_id = table_id;
+                            if (expr_count > 0) {
+                                Expr** expr_ptr = (Expr**)alist_get(&current->select.expressions, 0);
+                                Expr* agg_expr = expr_ptr ? *expr_ptr : NULL;
+                                if (agg_expr && agg_expr->type == EXPR_AGGREGATE_FUNC) {
+                                    aggregate_ir->aggregate.func_type = agg_expr->aggregate.func_type;
+                                    aggregate_ir->aggregate.operand = copy_expr(agg_expr->aggregate.operand);
+                                    agg_expr->aggregate.operand = NULL;
+                                    aggregate_ir->aggregate.distinct = agg_expr->aggregate.distinct;
+                                    aggregate_ir->aggregate.count_all = agg_expr->aggregate.count_all;
+                                }
+                            }
+                            aggregate_ir->next = NULL;
+                            current_ir->next = aggregate_ir;
+                            current_ir = aggregate_ir;
+                        }
+
+                        IRNode* project_ir = malloc(sizeof(IRNode));
+                        if (project_ir) {
+                            project_ir->type = IR_PROJECT;
+                            project_ir->project.table_id = table_id;
+                            alist_init(&project_ir->project.expressions, sizeof(Expr*), NULL);
+                            for (int i = 0; i < expr_count; i++) {
+                                Expr** expr_ptr = (Expr**)alist_get(&current->select.expressions, i);
                                 if (expr_ptr) {
-                                    Expr** dest = (Expr**)alist_append(&sort_ir->sort.order_by);
+                                    Expr** dest = (Expr**)alist_append(&project_ir->project.expressions);
                                     if (dest) *dest = *expr_ptr;
                                 }
-                                bool* desc_ptr = (bool*)alist_get(&current->select.order_by_desc, i);
-                                bool* dest = (bool*)alist_append(&sort_ir->sort.order_by_desc);
-                                if (dest) *dest = desc_ptr ? *desc_ptr : false;
                             }
-                            sort_ir->next = NULL;
-                            current_ir->next = sort_ir;
-                            current_ir = sort_ir;
+                            project_ir->project.limit = current->select.limit;
+                            project_ir->next = NULL;
+                            current_ir->next = project_ir;
                         }
-                    }
 
-                    IRNode* project_ir = malloc(sizeof(IRNode));
-                    if (project_ir) {
-                        project_ir->type = IR_PROJECT;
-                        project_ir->project.table_id = table_id;
-                        alist_init(&project_ir->project.expressions, sizeof(Expr*), NULL);
-                        for (int i = 0; i < expr_count; i++) {
-                            Expr** expr_ptr = (Expr**)alist_get(&current->select.expressions, i);
-                            if (expr_ptr) {
-                                Expr** dest = (Expr**)alist_append(&project_ir->project.expressions);
-                                if (dest) *dest = *expr_ptr;
+                    } else {
+                        new_ir->type = IR_SCAN_TABLE;
+                        new_ir->scan_table.table_id = table_id;
+
+                        IRNode* current_ir = new_ir;
+
+                        if (current->select.where_clause) {
+                            IRNode* filter_ir = malloc(sizeof(IRNode));
+                            if (filter_ir) {
+                                filter_ir->type = IR_FILTER;
+                                filter_ir->filter.table_id = table_id;
+                                filter_ir->filter.filter_expr = copy_expr(current->select.where_clause);
+                                filter_ir->next = NULL;
+                                current_ir->next = filter_ir;
+                                current_ir = filter_ir;
                             }
                         }
-                        project_ir->project.limit = current->select.limit;
-                        project_ir->next = NULL;
-                        current_ir->next = project_ir;
+
+                        int order_by_count = alist_length(&current->select.order_by);
+                        IRNode* sort_ir = NULL;
+                        if (order_by_count > 0) {
+                            log_msg(LOG_DEBUG, "ast_to_ir: Adding SORT node for %d order_by columns",
+                                    order_by_count);
+                            sort_ir = malloc(sizeof(IRNode));
+                            if (sort_ir) {
+                                sort_ir->type = IR_SORT;
+                                sort_ir->sort.table_id = table_id;
+                                alist_init(&sort_ir->sort.order_by, sizeof(Expr*), NULL);
+                                alist_init(&sort_ir->sort.order_by_desc, sizeof(bool), NULL);
+                                for (int i = 0; i < order_by_count; i++) {
+                                    Expr** expr_ptr = (Expr**)alist_get(&current->select.order_by, i);
+                                    if (expr_ptr) {
+                                        Expr** dest = (Expr**)alist_append(&sort_ir->sort.order_by);
+                                        if (dest) *dest = *expr_ptr;
+                                    }
+                                    bool* desc_ptr = (bool*)alist_get(&current->select.order_by_desc, i);
+                                    bool* dest = (bool*)alist_append(&sort_ir->sort.order_by_desc);
+                                    if (dest) *dest = desc_ptr ? *desc_ptr : false;
+                                }
+                                sort_ir->next = NULL;
+                                current_ir->next = sort_ir;
+                                current_ir = sort_ir;
+                            }
+                        }
+
+                        IRNode* project_ir = malloc(sizeof(IRNode));
+                        if (project_ir) {
+                            project_ir->type = IR_PROJECT;
+                            project_ir->project.table_id = table_id;
+                            alist_init(&project_ir->project.expressions, sizeof(Expr*), NULL);
+                            for (int i = 0; i < expr_count; i++) {
+                                Expr** expr_ptr = (Expr**)alist_get(&current->select.expressions, i);
+                                if (expr_ptr) {
+                                    Expr** dest = (Expr**)alist_append(&project_ir->project.expressions);
+                                    if (dest) *dest = *expr_ptr;
+                                }
+                            }
+                            project_ir->project.limit = current->select.limit;
+                            project_ir->next = NULL;
+                            current_ir->next = project_ir;
+                        }
                     }
                 }
             } break;
+
+            case AST_JOIN: {
+                new_ir->type = IR_JOIN;
+                new_ir->join.left_table_id = current->join.left_table_id;
+                new_ir->join.right_table_id = current->join.right_table_id;
+                new_ir->join.type = current->join.type;
+                new_ir->join.condition = current->join.condition ? copy_expr(current->join.condition) : NULL;
+                break;
+            }
 
             case AST_DROP_TABLE: {
                 new_ir->type = IR_DROP_TABLE;

@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,13 +31,21 @@ static void print_centered(const char* str, int width) {
 }
 
 static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name);
+static Value get_column_value_from_join(const Row* row, const TableDef* left_schema, 
+                                         const TableDef* right_schema, int left_col_count,
+                                         const char* column_name);
 static bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema);
+static bool eval_expression_for_join(const Expr* expr, const Row* row, 
+                                      const TableDef* left_schema, 
+                                      const TableDef* right_schema,
+                                      int left_col_count);
 static void exec_filter(const IRNode* current);
 static void exec_update_row(const IRNode* current);
 static void exec_delete_row(const IRNode* current);
 static void exec_aggregate(const IRNode* current);
 static void exec_project(const IRNode* current);
 static void exec_sort(const IRNode* current);
+static void exec_join(const IRNode* current);
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema);
 static void print_project_header(const IRNode* current, const TableDef* schema);
 static void print_project_row(const IRNode* current, const Row* row, const TableDef* schema);
@@ -140,13 +149,81 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
     }
 }
 
+static bool eval_expression_for_join(const Expr* expr, const Row* row, 
+                                      const TableDef* left_schema, 
+                                      const TableDef* right_schema,
+                                      int left_col_count) {
+    if (!expr) {
+        return true;
+    }
+
+    switch (expr->type) {
+        case EXPR_COLUMN: {
+            Value val = get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->column_name);
+            return !is_null(&val);
+        }
+        case EXPR_VALUE: {
+            return !is_null(&expr->value);
+        }
+        case EXPR_BINARY_OP: {
+            bool left_val = eval_expression_for_join(expr->binary.left, row, left_schema, right_schema, left_col_count);
+            bool right_val = eval_expression_for_join(expr->binary.right, row, left_schema, right_schema, left_col_count);
+
+            switch (expr->binary.op) {
+                case OP_AND:
+                    return left_val && right_val;
+                case OP_OR:
+                    return left_val || right_val;
+                case OP_EQUALS:
+                case OP_NOT_EQUALS:
+                case OP_LESS:
+                case OP_LESS_EQUAL:
+                case OP_GREATER:
+                case OP_GREATER_EQUAL: {
+                    if (expr->binary.left->type == EXPR_COLUMN &&
+                        expr->binary.right->type == EXPR_VALUE) {
+                        Value col_val =
+                            get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.left->column_name);
+                        return eval_comparison(col_val, expr->binary.right->value, expr->binary.op);
+                    } else if (expr->binary.left->type == EXPR_VALUE &&
+                               expr->binary.right->type == EXPR_COLUMN) {
+                        Value col_val =
+                            get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.right->column_name);
+                        return eval_comparison(expr->binary.left->value, col_val, expr->binary.op);
+                    } else if (expr->binary.left->type == EXPR_COLUMN &&
+                               expr->binary.right->type == EXPR_COLUMN) {
+                        Value left_val =
+                            get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.left->column_name);
+                        Value right_val =
+                            get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.right->column_name);
+                        return eval_comparison(left_val, right_val, expr->binary.op);
+                    }
+                    return false;
+                }
+                default:
+                    return false;
+            }
+        }
+        case EXPR_UNARY_OP: {
+            bool operand_val = eval_expression_for_join(expr->unary.operand, row, left_schema, right_schema, left_col_count);
+            if (expr->unary.op == OP_NOT) {
+                return !operand_val;
+            }
+            return false;
+        }
+        default:
+            return false;
+    }
+}
+
 /* Apply WHERE filter */
 static void exec_filter(const IRNode* current) {
     log_msg(LOG_DEBUG, "exec_filter: Filtering table ID: %d", current->filter.table_id);
 
     Table* table = get_table_by_id(current->filter.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_filter: Table with ID %d does not exist", current->filter.table_id);
+        log_msg(LOG_ERROR, "exec_filter: Table with ID %d does not exist",
+                current->filter.table_id);
         return;
     }
 
@@ -165,11 +242,13 @@ static void exec_filter(const IRNode* current) {
 }
 
 static void exec_update_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_update_row: Updating rows in table ID: %d", current->update_row.table_id);
+    log_msg(LOG_DEBUG, "exec_update_row: Updating rows in table ID: %d",
+            current->update_row.table_id);
 
     Table* table = get_table_by_id(current->update_row.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_update_row: Table with ID %d does not exist", current->update_row.table_id);
+        log_msg(LOG_ERROR, "exec_update_row: Table with ID %d does not exist",
+                current->update_row.table_id);
         return;
     }
 
@@ -196,49 +275,62 @@ static void exec_update_row(const IRNode* current) {
                         if (source_val.type != expected_type && source_val.type != TYPE_NULL) {
                             Value converted;
                             if (try_convert_value(&source_val, expected_type, &converted)) {
-                                if (row->values[col_idx].type == TYPE_STRING && row->values[col_idx].char_val) {
+                                if (row->values[col_idx].type == TYPE_STRING &&
+                                    row->values[col_idx].char_val) {
                                     free(row->values[col_idx].char_val);
                                 }
                                 row->values[col_idx] = converted;
                             } else {
                                 log_msg(LOG_ERROR,
-                                        "exec_update_row: Type mismatch for column '%s' (expected %s, got %s)",
+                                        "exec_update_row: Type mismatch for column '%s' (expected "
+                                        "%s, got %s)",
                                         col->name,
-                                        expected_type == TYPE_INT ? "INT" :
-                                        expected_type == TYPE_FLOAT ? "FLOAT" :
-                                        expected_type == TYPE_STRING ? "STRING" : "UNKNOWN",
-                                        source_val.type == TYPE_INT ? "INT" :
-                                        source_val.type == TYPE_FLOAT ? "FLOAT" :
-                                        source_val.type == TYPE_STRING ? "STRING" : "UNKNOWN");
-                                if (row->values[col_idx].type == TYPE_STRING && row->values[col_idx].char_val) {
+                                        expected_type == TYPE_INT      ? "INT"
+                                        : expected_type == TYPE_FLOAT  ? "FLOAT"
+                                        : expected_type == TYPE_STRING ? "STRING"
+                                                                       : "UNKNOWN",
+                                        source_val.type == TYPE_INT      ? "INT"
+                                        : source_val.type == TYPE_FLOAT  ? "FLOAT"
+                                        : source_val.type == TYPE_STRING ? "STRING"
+                                                                         : "UNKNOWN");
+                                if (row->values[col_idx].type == TYPE_STRING &&
+                                    row->values[col_idx].char_val) {
                                     free(row->values[col_idx].char_val);
                                 }
                                 row->values[col_idx] = VAL_NULL;
                             }
                         } else {
-                            if (row->values[col_idx].type == TYPE_STRING && row->values[col_idx].char_val) {
+                            if (row->values[col_idx].type == TYPE_STRING &&
+                                row->values[col_idx].char_val) {
                                 free(row->values[col_idx].char_val);
                             }
                             row->values[col_idx] = copy_value(&source_val);
                         }
 
                         if (!check_not_null_constraint(table, col_idx, &row->values[col_idx])) {
-                            log_msg(LOG_ERROR, "exec_update_row: NOT NULL constraint violated for column '%s'",
+                            log_msg(LOG_ERROR,
+                                    "exec_update_row: NOT NULL constraint violated for column '%s'",
                                     col->name);
                             return;
                         }
 
-                        if (col->is_unique) {
-                            if (!check_unique_constraint(table, col_idx, &row->values[col_idx], row_idx)) {
-                                log_msg(LOG_ERROR, "exec_update_row: UNIQUE constraint violated for column '%s'",
-                                        col->name);
+                        if (col->flags & COL_FLAG_UNIQUE) {
+                            if (!check_unique_constraint(table, col_idx, &row->values[col_idx],
+                                                         row_idx)) {
+                                log_msg(
+                                    LOG_ERROR,
+                                    "exec_update_row: UNIQUE constraint violated for column '%s'",
+                                    col->name);
                                 return;
                             }
                         }
 
-                        if (col->is_foreign_key) {
-                            if (!check_foreign_key_constraint(table, col_idx, &row->values[col_idx])) {
-                                log_msg(LOG_ERROR, "exec_update_row: FOREIGN KEY constraint violated for column '%s'",
+                        if (col->flags & COL_FLAG_FOREIGN_KEY) {
+                            if (!check_foreign_key_constraint(table, col_idx,
+                                                              &row->values[col_idx])) {
+                                log_msg(LOG_ERROR,
+                                        "exec_update_row: FOREIGN KEY constraint violated for "
+                                        "column '%s'",
                                         col->name);
                                 return;
                             }
@@ -250,8 +342,7 @@ static void exec_update_row(const IRNode* current) {
             }
         }
     }
-    log_msg(LOG_INFO, "exec_update_row: Updated %d rows in table '%s'", updated_rows,
-            table->name);
+    log_msg(LOG_INFO, "exec_update_row: Updated %d rows in table '%s'", updated_rows, table->name);
 }
 
 static void exec_aggregate(const IRNode* current) {
@@ -260,12 +351,13 @@ static void exec_aggregate(const IRNode* current) {
             : current->aggregate.func_type == FUNC_AVG   ? "AVG"
             : current->aggregate.func_type == FUNC_COUNT ? "COUNT"
             : current->aggregate.func_type == FUNC_MIN   ? "MIN"
-            : current->aggregate.func_type == FUNC_MAX ? "MAX"
+            : current->aggregate.func_type == FUNC_MAX   ? "MAX"
                                                          : "UNKNOWN");
 
     Table* table = get_table_by_id(current->aggregate.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_aggregate: Table with ID %d does not exist", current->aggregate.table_id);
+        log_msg(LOG_ERROR, "exec_aggregate: Table with ID %d does not exist",
+                current->aggregate.table_id);
         return;
     }
 
@@ -292,13 +384,12 @@ static void exec_aggregate(const IRNode* current) {
             if (!row) continue;
             Value val = VAL_NULL;
             if (current->aggregate.operand->type == EXPR_COLUMN) {
-                val = get_column_value(row, &table->schema,
-                                       current->aggregate.operand->column_name);
+                val =
+                    get_column_value(row, &table->schema, current->aggregate.operand->column_name);
             } else if (current->aggregate.operand->type == EXPR_VALUE) {
                 val = current->aggregate.operand->value;
             } else {
-                val = eval_select_expression(current->aggregate.operand, row,
-                                             &table->schema);
+                val = eval_select_expression(current->aggregate.operand, row, &table->schema);
             }
             update_aggregate_state(&state, &val, &current->aggregate);
         }
@@ -334,7 +425,8 @@ static void exec_project(const IRNode* current) {
 
     Table* table = get_table_by_id(current->project.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_project: Table with ID %d does not exist", current->project.table_id);
+        log_msg(LOG_ERROR, "exec_project: Table with ID %d does not exist",
+                current->project.table_id);
         return;
     }
 
@@ -417,6 +509,36 @@ static Value get_column_value(const Row* row, const TableDef* schema, const char
     return VAL_NULL;
 }
 
+static Value get_column_value_from_join(const Row* row, const TableDef* left_schema, 
+                                         const TableDef* right_schema, int left_col_count,
+                                         const char* column_name) {
+    int left_count = alist_length(&left_schema->columns);
+    for (int i = 0; i < left_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&left_schema->columns, i);
+        if (!col) continue;
+        if (strcmp(col->name, column_name) == 0) {
+            if (row->values[i].type == TYPE_NULL) {
+                return VAL_NULL;
+            } else {
+                return row->values[i];
+            }
+        }
+    }
+    int right_count = alist_length(&right_schema->columns);
+    for (int i = 0; i < right_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&right_schema->columns, i);
+        if (!col) continue;
+        if (strcmp(col->name, column_name) == 0) {
+            if (row->values[left_col_count + i].type == TYPE_NULL) {
+                return VAL_NULL;
+            } else {
+                return row->values[left_col_count + i];
+            }
+        }
+    }
+    return VAL_NULL;
+}
+
 static void print_project_header(const IRNode* current, const TableDef* schema) {
     int column_count = alist_length(&current->project.expressions);
 
@@ -444,16 +566,14 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
         if (expr[0]->type == EXPR_COLUMN) {
             print_centered(expr[0]->column_name, 20);
         } else if (expr[0]->type == EXPR_AGGREGATE_FUNC) {
-            print_centered(
-                expr[0]->aggregate.func_type == FUNC_COUNT ? "COUNT"
-                : expr[0]->aggregate.func_type == FUNC_SUM ? "SUM"
-                : expr[0]->aggregate.func_type == FUNC_AVG ? "AVG"
-                : expr[0]->aggregate.func_type == FUNC_MIN ? "MIN"
-                : expr[0]->aggregate.func_type == FUNC_MAX ? "MAX"
-                                                           : "UNKNOWN",
-                20);
-        } else if (expr[0]->type == EXPR_VALUE &&
-                   strcmp(expr[0]->value.char_val, "*") == 0) {
+            print_centered(expr[0]->aggregate.func_type == FUNC_COUNT ? "COUNT"
+                           : expr[0]->aggregate.func_type == FUNC_SUM ? "SUM"
+                           : expr[0]->aggregate.func_type == FUNC_AVG ? "AVG"
+                           : expr[0]->aggregate.func_type == FUNC_MIN ? "MIN"
+                           : expr[0]->aggregate.func_type == FUNC_MAX ? "MAX"
+                                                                      : "UNKNOWN",
+                           20);
+        } else if (expr[0]->type == EXPR_VALUE && strcmp(expr[0]->value.char_val, "*") == 0) {
             int schema_col_count = alist_length(&schema->columns);
             for (int j = 0; j < schema_col_count; j++) {
                 ColumnDef* col = (ColumnDef*)alist_get(&schema->columns, j);
@@ -466,8 +586,7 @@ static void print_project_header(const IRNode* current, const TableDef* schema) 
         } else {
             print_centered("expression", 20);
         }
-        if (!(expr[0]->type == EXPR_VALUE &&
-              strcmp(expr[0]->value.char_val, "*") == 0 && i == 0)) {
+        if (!(expr[0]->type == EXPR_VALUE && strcmp(expr[0]->value.char_val, "*") == 0 && i == 0)) {
             printf("│");
         }
     }
@@ -490,8 +609,7 @@ static void print_project_row(const IRNode* current, const Row* row, const Table
     int expr_count = alist_length(&current->project.expressions);
     for (int col_idx = 0; col_idx < expr_count; col_idx++) {
         Expr** expr = (Expr**)alist_get(&current->project.expressions, col_idx);
-        if (expr[0]->type == EXPR_VALUE &&
-            strcmp(expr[0]->value.char_val, "*") == 0) {
+        if (expr[0]->type == EXPR_VALUE && strcmp(expr[0]->value.char_val, "*") == 0) {
             int schema_col_count = alist_length(&schema->columns);
             for (int j = 0; j < schema_col_count; j++) {
                 if (row->values[j].type == TYPE_NULL) {
@@ -512,8 +630,7 @@ static void print_project_row(const IRNode* current, const Row* row, const Table
                 print_centered(repr(&val), 20);
             }
         }
-        if (!(expr[0]->type == EXPR_VALUE &&
-              strcmp(expr[0]->value.char_val, "*") == 0 &&
+        if (!(expr[0]->type == EXPR_VALUE && strcmp(expr[0]->value.char_val, "*") == 0 &&
               col_idx == 0)) {
             printf("│");
         }
@@ -566,8 +683,8 @@ static void exec_sort(const IRNode* current) {
             Row* row_j = (Row*)alist_get(&table->rows, j);
             Row* row_j1 = (Row*)alist_get(&table->rows, j + 1);
             if (!row_j || !row_j1) continue;
-            int cmp = compare_rows_for_sort(row_j, row_j1, &table->schema,
-                                            &current->sort.order_by, order_by_count);
+            int cmp = compare_rows_for_sort(row_j, row_j1, &table->schema, &current->sort.order_by,
+                                            order_by_count);
             bool swap_needed = false;
             if (cmp != 0) {
                 if (*(bool*)alist_get(&current->sort.order_by_desc, 0)) {
@@ -584,6 +701,163 @@ static void exec_sort(const IRNode* current) {
             }
         }
     }
+}
+
+static void exec_join(const IRNode* current) {
+    log_msg(LOG_DEBUG, "exec_join: Joining tables %d and %d", current->join.left_table_id,
+            current->join.right_table_id);
+
+    Table* left_table = get_table_by_id(current->join.left_table_id);
+    Table* right_table = get_table_by_id(current->join.right_table_id);
+
+    if (!left_table) {
+        log_msg(LOG_ERROR, "exec_join: Left table with ID %d does not exist", current->join.left_table_id);
+        return;
+    }
+    if (!right_table) {
+        log_msg(LOG_ERROR, "exec_join: Right table with ID %d does not exist", current->join.right_table_id);
+        return;
+    }
+
+    int left_row_count = alist_length(&left_table->rows);
+    int right_row_count = alist_length(&right_table->rows);
+
+    if (left_row_count == 0 && current->join.type == JOIN_LEFT) {
+        return;
+    }
+
+    int left_col_count = alist_length(&left_table->schema.columns);
+    int right_col_count = alist_length(&right_table->schema.columns);
+
+    printf("┌");
+    for (int i = 0; i < left_col_count; i++) {
+        for (int j = 0; j < 20; j++) printf("─");
+        if (i < left_col_count - 1) printf("┬");
+    }
+    printf("┬");
+    for (int i = 0; i < right_col_count; i++) {
+        for (int j = 0; j < 20; j++) printf("─");
+        if (i < right_col_count - 1) printf("┬");
+    }
+    printf("┐\n");
+
+    printf("│");
+    for (int i = 0; i < left_col_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&left_table->schema.columns, i);
+        if (col) {
+            print_centered(col->name, 20);
+        }
+        printf("│");
+    }
+    for (int i = 0; i < right_col_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&right_table->schema.columns, i);
+        if (col) {
+            print_centered(col->name, 20);
+        }
+        if (i < right_col_count - 1) printf("│");
+    }
+    printf("\n");
+
+    printf("├");
+    for (int i = 0; i < left_col_count; i++) {
+        for (int j = 0; j < 20; j++) printf("─");
+        if (i < left_col_count - 1) printf("┬");
+    }
+    printf("┬");
+    for (int i = 0; i < right_col_count; i++) {
+        for (int j = 0; j < 20; j++) printf("─");
+        if (i < right_col_count - 1) printf("┬");
+    }
+    printf("┤\n");
+
+    int result_count = 0;
+
+    for (int i = 0; i < left_row_count; i++) {
+        Row* left_row = (Row*)alist_get(&left_table->rows, i);
+        if (!left_row) continue;
+
+        bool found_match = false;
+
+        for (int j = 0; j < right_row_count; j++) {
+            Row* right_row = (Row*)alist_get(&right_table->rows, j);
+            if (!right_row) continue;
+
+            if (current->join.condition) {
+                Row combined_row = {0};
+                combined_row.value_count = left_row->value_count + right_row->value_count;
+                combined_row.value_capacity = combined_row.value_count;
+                combined_row.values = malloc(sizeof(Value) * combined_row.value_count);
+                if (!combined_row.values) {
+                    log_msg(LOG_ERROR, "exec_join: Failed to allocate memory for combined row");
+                    continue;
+                }
+                for (int k = 0; k < left_row->value_count; k++) {
+                    combined_row.values[k] = left_row->values[k];
+                }
+                for (int k = 0; k < right_row->value_count; k++) {
+                    combined_row.values[left_row->value_count + k] = right_row->values[k];
+                }
+                bool result = eval_expression_for_join(current->join.condition, &combined_row, 
+                                                       &left_table->schema, &right_table->schema, 
+                                                       left_row->value_count);
+                free(combined_row.values);
+                if (!result) continue;
+            }
+
+            found_match = true;
+            result_count++;
+
+            printf("│");
+            for (int k = 0; k < left_row->value_count && k < left_col_count; k++) {
+                const char* val_str = repr(&left_row->values[k]);
+                print_centered(val_str, 20);
+                printf("│");
+            }
+            for (int k = left_row->value_count; k < left_col_count; k++) {
+                print_centered("NULL", 20);
+                printf("│");
+            }
+            for (int k = 0; k < right_row->value_count && k < right_col_count; k++) {
+                const char* val_str = repr(&right_row->values[k]);
+                print_centered(val_str, 20);
+                if (k < right_col_count - 1) printf("│");
+            }
+            printf("\n");
+        }
+
+        if (!found_match && current->join.type == JOIN_LEFT) {
+            result_count++;
+            printf("│");
+            for (int k = 0; k < left_row->value_count && k < left_col_count; k++) {
+                const char* val_str = repr(&left_row->values[k]);
+                print_centered(val_str, 20);
+                printf("│");
+            }
+            for (int k = left_row->value_count; k < left_col_count; k++) {
+                print_centered("NULL", 20);
+                printf("│");
+            }
+            for (int k = 0; k < right_col_count; k++) {
+                print_centered("NULL", 20);
+                if (k < right_col_count - 1) printf("│");
+            }
+            printf("\n");
+        }
+    }
+
+    printf("└");
+    for (int i = 0; i < left_col_count; i++) {
+        for (int j = 0; j < 20; j++) printf("─");
+        if (i < left_col_count - 1) printf("┴");
+    }
+    printf("┴");
+    for (int i = 0; i < right_col_count; i++) {
+        for (int j = 0; j < 20; j++) printf("─");
+        if (i < right_col_count - 1) printf("┴");
+    }
+    printf("┘\n");
+
+    log_msg(LOG_INFO, "exec_join: Join returned %d rows", result_count);
 }
 
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
@@ -1010,7 +1284,8 @@ static void exec_delete_row(const IRNode* current) {
 
     Table* table = get_table_by_id(current->delete_row.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_delete_row: Table with ID %d does not exist", current->delete_row.table_id);
+        log_msg(LOG_ERROR, "exec_delete_row: Table with ID %d does not exist",
+                current->delete_row.table_id);
         return;
     }
 
@@ -1090,7 +1365,12 @@ void exec_ir(IRNode* ir) {
                 break;
 
             case IR_PROJECT:
+                if (current->project.table_id == 0) return;
                 exec_project(current);
+                break;
+
+            case IR_JOIN:
+                exec_join(current);
                 break;
 
             case IR_CREATE_INDEX:
@@ -1144,7 +1424,8 @@ static void capture_project_result(const IRNode* current) {
 
     Table* table = get_table_by_id(current->project.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "capture_project_result: Table with ID %d does not exist", current->project.table_id);
+        log_msg(LOG_ERROR, "capture_project_result: Table with ID %d does not exist",
+                current->project.table_id);
         return;
     }
 

@@ -1,10 +1,12 @@
 #include "table.h"
 
+#include <stdio.h>
+#include <strings.h>
+
+#include "arraylist.h"
 #include "db.h"
 #include "logger.h"
 #include "values.h"
-#include "arraylist.h"
-#include <strings.h>
 
 ArrayList tables;
 ArrayList indexes;
@@ -179,8 +181,7 @@ Table* find_table(const char* name) {
 
 Table* get_table(const char* name) { return find_table(name); }
 
-Table* get_table_by_id(int table_id) {
-    if (table_id < 0) return NULL;
+Table* get_table_by_id(uint8_t table_id) {
     int count = alist_length(&tables);
     for (int i = 0; i < count; i++) {
         Table* table = (Table*)alist_get(&tables, i);
@@ -211,7 +212,7 @@ void exec_create_table(const IRNode* current) {
     int column_count = alist_length(&table->schema.columns);
     for (int i = 0; i < column_count; i++) {
         ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, i);
-        if (col && (col->is_primary_key || col->is_unique)) {
+        if (col && (col->flags & (COL_FLAG_PRIMARY_KEY | COL_FLAG_UNIQUE))) {
             char index_name[MAX_TABLE_NAME_LEN];
             size_t prefix_len = 4;
             memcpy(index_name, "idx_", prefix_len);
@@ -229,7 +230,8 @@ void exec_create_table(const IRNode* current) {
             index_name[prefix_len + name_len + 1 + col_len] = '\0';
             index_table_column(table->name, col->name, index_name);
             log_msg(LOG_INFO, "exec_create_table: Created %s index '%s' on column '%s'",
-                    col->is_primary_key ? "PRIMARY KEY" : "UNIQUE", index_name, col->name);
+                    (col->flags & COL_FLAG_PRIMARY_KEY) ? "PRIMARY KEY" : "UNIQUE", index_name,
+                    col->name);
         }
     }
 
@@ -257,9 +259,8 @@ bool value_equals(const Value* a, const Value* b) {
 bool check_not_null_constraint(Table* table, int col_idx, Value* val) {
     ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
     if (!col) return false;
-    if (!col->nullable && is_null(val)) {
-        log_msg(LOG_ERROR, "Constraint violation: NOT NULL on column '%s'",
-                col->name);
+    if (!(col->flags & COL_FLAG_NULLABLE) && is_null(val)) {
+        log_msg(LOG_ERROR, "Constraint violation: NOT NULL on column '%s'", col->name);
         return false;
     }
     return true;
@@ -285,7 +286,7 @@ bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_
 bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
     ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
     if (!col) return false;
-    if (!col->is_foreign_key || col->references_table[0] == '\0') return true;
+    if (!(col->flags & COL_FLAG_FOREIGN_KEY) || col->references_table[0] == '\0') return true;
     if (is_null(val)) return true;
 
     Table* ref_table = find_table(col->references_table);
@@ -310,8 +311,10 @@ bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
     }
 
     if (ref_col_idx < 0) {
-        log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY references non-existent column '%s' in table '%s'",
-                col->references_column, col->references_table);
+        log_msg(
+            LOG_ERROR,
+            "Constraint violation: FOREIGN KEY references non-existent column '%s' in table '%s'",
+            col->references_column, col->references_table);
         return false;
     }
 
@@ -325,17 +328,20 @@ bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
     }
 
     ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, ref_col_idx);
-    log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY on column '%s' (value '%s' not found in %s.%s)",
+    log_msg(LOG_ERROR,
+            "Constraint violation: FOREIGN KEY on column '%s' (value '%s' not found in %s.%s)",
             col->name, repr(val), col->references_table, ref_col ? ref_col->name : "unknown");
     return false;
 }
 
 void exec_insert_row(const IRNode* current) {
-    log_msg(LOG_DEBUG, "exec_insert_row: Inserting row into table ID: %d", current->insert_row.table_id);
+    log_msg(LOG_DEBUG, "exec_insert_row: Inserting row into table ID: %d",
+            current->insert_row.table_id);
 
     Table* table = get_table_by_id(current->insert_row.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_insert_row: Table with ID %d does not exist", current->insert_row.table_id);
+        log_msg(LOG_ERROR, "exec_insert_row: Table with ID %d does not exist",
+                current->insert_row.table_id);
         return;
     }
 
@@ -378,12 +384,14 @@ void exec_insert_row(const IRNode* current) {
                 log_msg(LOG_ERROR,
                         "exec_insert_row: Type mismatch for column '%s' (expected %s, got %s)",
                         col->name,
-                        expected_type == TYPE_INT ? "INT" :
-                        expected_type == TYPE_FLOAT ? "FLOAT" :
-                        expected_type == TYPE_STRING ? "STRING" : "UNKNOWN",
-                        source_val.type == TYPE_INT ? "INT" :
-                        source_val.type == TYPE_FLOAT ? "FLOAT" :
-                        source_val.type == TYPE_STRING ? "STRING" : "UNKNOWN");
+                        expected_type == TYPE_INT      ? "INT"
+                        : expected_type == TYPE_FLOAT  ? "FLOAT"
+                        : expected_type == TYPE_STRING ? "STRING"
+                                                       : "UNKNOWN",
+                        source_val.type == TYPE_INT      ? "INT"
+                        : source_val.type == TYPE_FLOAT  ? "FLOAT"
+                        : source_val.type == TYPE_STRING ? "STRING"
+                                                         : "UNKNOWN");
                 row->values[i] = VAL_NULL;
             }
         } else {
@@ -396,7 +404,7 @@ void exec_insert_row(const IRNode* current) {
             return;
         }
 
-        if (col->is_unique) {
+        if (col->flags & COL_FLAG_UNIQUE) {
             if (!check_unique_constraint(table, i, &row->values[i], -1)) {
                 log_msg(LOG_ERROR, "exec_insert_row: UNIQUE constraint violated for column '%s'",
                         col->name);
@@ -404,9 +412,10 @@ void exec_insert_row(const IRNode* current) {
             }
         }
 
-        if (col->is_foreign_key) {
+        if (col->flags & COL_FLAG_FOREIGN_KEY) {
             if (!check_foreign_key_constraint(table, i, &row->values[i])) {
-                log_msg(LOG_ERROR, "exec_insert_row: FOREIGN KEY constraint violated for column '%s'",
+                log_msg(LOG_ERROR,
+                        "exec_insert_row: FOREIGN KEY constraint violated for column '%s'",
                         col->name);
                 return;
             }
@@ -414,8 +423,8 @@ void exec_insert_row(const IRNode* current) {
     }
     row->value_count = value_count;
 
-    log_msg(LOG_INFO, "exec_insert_row: Row inserted into table '%s' (row %d)",
-            table->name, alist_length(&table->rows));
+    log_msg(LOG_INFO, "exec_insert_row: Row inserted into table '%s' (row %d)", table->name,
+            alist_length(&table->rows));
 }
 
 void exec_scan_table(const IRNode* current) {
@@ -423,7 +432,8 @@ void exec_scan_table(const IRNode* current) {
 
     Table* table = get_table_by_id(current->scan_table.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_scan_table: Table with ID %d does not exist", current->scan_table.table_id);
+        log_msg(LOG_ERROR, "exec_scan_table: Table with ID %d does not exist",
+                current->scan_table.table_id);
         return;
     }
 }
@@ -433,7 +443,8 @@ void exec_drop_table(const IRNode* current) {
 
     Table* table = get_table_by_id(current->drop_table.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_drop_table: Table with ID %d does not exist", current->drop_table.table_id);
+        log_msg(LOG_ERROR, "exec_drop_table: Table with ID %d does not exist",
+                current->drop_table.table_id);
         return;
     }
 
@@ -448,7 +459,8 @@ void exec_drop_table(const IRNode* current) {
     }
 
     if (table_index < 0) {
-        log_msg(LOG_ERROR, "exec_drop_table: Table with ID %d not found in tables list", current->drop_table.table_id);
+        log_msg(LOG_ERROR, "exec_drop_table: Table with ID %d not found in tables list",
+                current->drop_table.table_id);
         return;
     }
 
@@ -631,8 +643,8 @@ void index_table_column(const char* table_name, const char* column_name, const c
     }
 
     if (column_idx < 0) {
-        log_msg(LOG_ERROR, "index_table_column: Column '%s' not found in table '%s'",
-                column_name, table_name);
+        log_msg(LOG_ERROR, "index_table_column: Column '%s' not found in table '%s'", column_name,
+                table_name);
         return;
     }
 
@@ -720,15 +732,18 @@ void drop_index_by_name(const char* index_name) {
 
 void exec_create_index(const IRNode* current) {
     log_msg(LOG_DEBUG, "exec_create_index: Creating index '%s' on table ID %d column '%s'",
-            current->create_index.index_name, current->create_index.table_id, current->create_index.column_name);
+            current->create_index.index_name, current->create_index.table_id,
+            current->create_index.column_name);
 
     Table* table = get_table_by_id(current->create_index.table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "exec_create_index: Table with ID %d does not exist", current->create_index.table_id);
+        log_msg(LOG_ERROR, "exec_create_index: Table with ID %d does not exist",
+                current->create_index.table_id);
         return;
     }
 
-    index_table_column(table->name, current->create_index.column_name, current->create_index.index_name);
+    index_table_column(table->name, current->create_index.column_name,
+                       current->create_index.index_name);
 }
 
 void exec_drop_index(const IRNode* current) {
