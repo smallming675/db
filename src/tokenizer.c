@@ -31,8 +31,10 @@ static const KeywordMap keywords[] = {{"CREATE", TOKEN_KEYWORD},
                                       {"DROP", TOKEN_KEYWORD},
                                       {"EXIT", TOKEN_KEYWORD},
                                       {"INT", TOKEN_KEYWORD},
-                                      {"STRING", TOKEN_KEYWORD},
-                                      {"FLOAT", TOKEN_KEYWORD},
+                                      {"INTEGER", TOKEN_KEYWORD},
+                                       {"STRING", TOKEN_KEYWORD},
+                                       {"TEXT", TOKEN_KEYWORD},
+                                       {"FLOAT", TOKEN_KEYWORD},
                                       {"NULL", TOKEN_KEYWORD},
                                       {"WHERE", TOKEN_KEYWORD},
                                       {"UPDATE", TOKEN_KEYWORD},
@@ -55,10 +57,9 @@ static const KeywordMap keywords[] = {{"CREATE", TOKEN_KEYWORD},
                                       {"AVG", TOKEN_AGGREGATE_FUNC},
                                       {"MIN", TOKEN_AGGREGATE_FUNC},
                                       {"MAX", TOKEN_AGGREGATE_FUNC},
-                                      {"ABS", TOKEN_SCALAR_FUNC},
-                                      {"MID", TOKEN_SCALAR_FUNC},
-                                      {"LEFT", TOKEN_SCALAR_FUNC},
-                                      {"RIGHT", TOKEN_SCALAR_FUNC},
+                                       {"ABS", TOKEN_SCALAR_FUNC},
+                                       {"MID", TOKEN_SCALAR_FUNC},
+                                       {"RIGHT", TOKEN_SCALAR_FUNC},
                                       {"UPPER", TOKEN_SCALAR_FUNC},
                                       {"LOWER", TOKEN_SCALAR_FUNC},
                                       {"LENGTH", TOKEN_SCALAR_FUNC},
@@ -81,7 +82,8 @@ static const KeywordMap keywords[] = {{"CREATE", TOKEN_KEYWORD},
                                        {"FOREIGN", TOKEN_KEYWORD},
                                        {"JOIN", TOKEN_JOIN},
                                        {"INNER", TOKEN_INNER},
-                                       {"LEFT", TOKEN_LEFT} };
+                                       {"LEFT", TOKEN_LEFT},
+                                       {"STRICT", TOKEN_STRICT} };
 
 static const OperatorMap operators[] = {{"==", TOKEN_EQUALS},     {"!=", TOKEN_NOT_EQUALS},
                                         {"<=", TOKEN_LESS_EQUAL}, {">=", TOKEN_GREATER_EQUAL},
@@ -149,6 +151,23 @@ static int tokenize_string(const char* input, int i, ArrayList* tokens) {
     }
 
     token->type = TOKEN_STRING;
+    return i;
+}
+
+static int tokenize_backtick(const char* input, int i, ArrayList* tokens) {
+    char quote = input[i++];
+    int j = 0;
+    int len = strlen(input);
+
+    Token* token = (Token*)alist_append(tokens);
+
+    while (i < len && input[i] != quote && j < MAX_TOKEN_LEN - 1) {
+        token->value[j++] = input[i++];
+    }
+    if (i < len && input[i] == quote) i++;
+
+    token->value[j] = '\0';
+    token->type = TOKEN_IDENTIFIER;
     return i;
 }
 
@@ -242,6 +261,8 @@ Token* tokenize(const char* input) {
             i++;
         } else if (input[i] == '\'' || input[i] == '"') {
             i = tokenize_string(input, i, &tokens);
+        } else if (input[i] == '`') {
+            i = tokenize_backtick(input, i, &tokens);
         } else if (input[i] == '-' &&
                    (isdigit(input[i + 1]) || (input[i + 1] == '.' && isdigit(input[i + 2])))) {
             char neg_value[32];

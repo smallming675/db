@@ -106,8 +106,6 @@ bool is_null(const Value* val) {
     return val->type == TYPE_NULL;
 }
 
-
-
 const char* repr(const Value* val) {
     static char buffer[MAX_STRING_LEN];
 
@@ -128,12 +126,12 @@ const char* repr(const Value* val) {
             buffer[MAX_STRING_LEN - 1] = '\0';
             break;
         case TYPE_TIME:
-            snprintf(buffer, MAX_STRING_LEN, "%02d:%02d:%02d",
-                     time_hour(val->time_val.time_val), time_minute(val->time_val.time_val), time_second(val->time_val.time_val));
+            snprintf(buffer, MAX_STRING_LEN, "%02d:%02d:%02d", time_hour(val->time_val.time_val),
+                     time_minute(val->time_val.time_val), time_second(val->time_val.time_val));
             break;
         case TYPE_DATE:
-            snprintf(buffer, MAX_STRING_LEN, "%04d-%02d-%02d",
-                     date_year(val->date_val.date_val), date_month(val->date_val.date_val), date_day(val->date_val.date_val));
+            snprintf(buffer, MAX_STRING_LEN, "%04d-%02d-%02d", date_year(val->date_val.date_val),
+                     date_month(val->date_val.date_val), date_day(val->date_val.date_val));
             break;
         case TYPE_ERROR:
             strcpy(buffer, "ERROR");
@@ -175,6 +173,17 @@ static int compare_values(const Value* left, const Value* right) {
     if (left->type == TYPE_STRING && right->type == TYPE_STRING) {
         return strcmp(left->char_val, right->char_val);
     }
+
+    /* Dates and time are stored as integers, where later datetimes are always larger
+       thus it can be compared directly */
+    if (left->type == TYPE_DATE && right->type == TYPE_DATE) {
+        return left->date_val.date_val - right->date_val.date_val;
+    }
+
+    if (left->type == TYPE_TIME && right->type == TYPE_TIME) {
+        return left->time_val.time_val - right->time_val.time_val;
+    }
+
     return 0;
 }
 
@@ -250,85 +259,7 @@ bool eval_comparison(Value left, Value right, OperatorType op) {
     }
 }
 
-
-
-void update_aggregate_state(AggState* state, const Value* val,
-                                    const IRAggregate* agg) {
-    if (is_null(val)) {
-        return;  // Skip NULL values
-    }
-
-    if (agg->distinct) {
-        int seen_count = alist_length(&state->seen_values);
-        for (int i = 0; i < seen_count; i++) {
-            char* seen = (char*)alist_get(&state->seen_values, i);
-            if (seen && compare_values(val, (Value*)seen) == 0) {
-                return;  // Skip duplicate
-            }
-        }
-        const char* char_val = val->char_val;
-        if (val->type == TYPE_INT) {
-            static char int_buf[32];
-            snprintf(int_buf, sizeof(int_buf), "%d", val->int_val);
-            char_val = int_buf;
-        } else if (val->type == TYPE_FLOAT) {
-            static char float_buf[32];
-            snprintf(float_buf, sizeof(float_buf), "%.6f", val->float_val);
-            char_val = float_buf;
-        }
-        char* val_copy = malloc(strlen(char_val) + 1);
-        if (val_copy) {
-            strcpy(val_copy, char_val);
-            char** appended = (char**)alist_append(&state->seen_values);
-            if (appended) {
-                *appended = val_copy;
-            } else {
-                free(val_copy);
-            }
-        }
-    }
-
-    if (agg->func_type == FUNC_SUM || agg->func_type == FUNC_AVG) {
-        if (val->type == TYPE_FLOAT) {
-            state->sum += val->float_val;
-        } else if (val->type == TYPE_INT) {
-            state->sum += val->int_val;
-        } else {
-            log_msg(LOG_ERROR, "Summing non-numeric type '%s' of type '%s'", repr(val), val->type);
-        }
-    }
-
-    if (agg->func_type == FUNC_COUNT || agg->func_type == FUNC_AVG) {
-        if (!agg->count_all) {
-            state->count++;  // Count non-NULL values
-        }
-    }
-
-    if (agg->func_type == FUNC_MIN) {
-        if (!state->has_min) {
-            state->min_val = *val;
-            state->has_min = true;
-        } else {
-            if (compare_values(val, &(state->min_val)) < 0) {
-                state->min_val = *val;
-            }
-        }
-    }
-
-    if (agg->func_type == FUNC_MAX) {
-        if (!state->has_max) {
-            state->max_val = *val;
-            state->has_max = true;
-        } else {
-            if (compare_values(val, &(state->max_val)) > 0) {
-                state->max_val = *val;
-            }
-        }
-    }
-}
-
-Value compute_aggregate(AggFuncType func_type, AggState* state,
-                               DataType return_type) {
+Value compute_aggregate(AggFuncType func_type, AggState* state, DataType return_type) {
     Value result;
 
     if (func_type == FUNC_SUM) {

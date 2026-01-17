@@ -62,21 +62,12 @@ static bool exec(const char* sql) {
     Token* tokens = tokenize(sql);
     ASTNode* ast = parse(tokens);
     if (ast) {
-        IRNode* ir = ast_to_ir(ast);
-        if (ir) {
-            exec_ir(ir);
-            free_ir(ir);
-            free_tokens(tokens);
-            free_ast(ast);
-            return true;
-        } else {
-            log_msg(LOG_WARN, "exec_ir: Called with NULL IR");
-            free_tokens(tokens);
-            free_ast(ast);
-            return false;
-        }
+        exec_ast(ast);
+        free_tokens(tokens);
+        free_ast(ast);
+        return true;
     } else {
-        log_msg(LOG_WARN, "ast_to_ir: called with NULL AST");
+        log_msg(LOG_WARN, "exec_ast: Called with NULL AST");
         free_tokens(tokens);
         return false;
     }
@@ -147,19 +138,11 @@ void test_update_where_clause(void) {
     ASTNode* ast = parse(tokens);
     if (ast) {
         log_msg(LOG_DEBUG, "AST parsing successful");
-        IRNode* ir = ast_to_ir(ast);
-        if (ir) {
-            log_msg(LOG_DEBUG, "IR generation successful");
-            assert(ir->type == IR_UPDATE_ROW);
-        } else {
-            log_msg(LOG_DEBUG, "IR generation failed");
-        }
-        free_tokens(tokens);
-        free_ast(ast);
-        free_ir(ir);
     } else {
         log_msg(LOG_DEBUG, "AST parsing failed");
     }
+    free_tokens(tokens);
+    free_ast(ast);
 
     log_msg(LOG_INFO, "Testing UPDATE with complex WHERE clause...");
     exec("UPDATE products SET price = 1099.99 WHERE name = 'Laptop';");
@@ -569,6 +552,8 @@ static void test_date_time_literal_parsing(void) {
     exec("SELECT * FROM parse_test WHERE date_col IS NULL;");
     exec("SELECT * FROM parse_test WHERE time_col IS NULL;");
 
+    table = find_table("parse_test");
+    assert(table != NULL);
     assert(alist_length(&table->rows) == 15);
 
     log_msg(LOG_INFO, "DATE and TIME literal parsing tests passed");

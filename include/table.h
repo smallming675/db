@@ -3,18 +3,15 @@
 
 #include "db.h"
 #include "arraylist.h"
+#include "db.h"
 
 extern ArrayList tables;
 
-Table* find_table(const char* name);
-Table* get_table(const char* name);
 Table* get_table_by_id(uint8_t table_id);
-void exec_create_table(const IRNode* current);
-void exec_insert_row(const IRNode* current);
-void exec_scan_table(const IRNode* current);
-void exec_drop_table(const IRNode* current);
-void exec_create_index(const IRNode* current);
-void exec_drop_index(const IRNode* current);
+Table* find_table(const char* table_name);
+void init_tables(void);
+void free_table_internal(void* ptr);
+void copy_row(Row* dst, const Row* src, int dst_value_offset);
 void print_table_header(const TableDef* schema);
 void print_table_separator(int column_count);
 void print_row_data(const Row* row, const TableDef* schema);

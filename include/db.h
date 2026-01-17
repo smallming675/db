@@ -56,7 +56,8 @@ typedef enum {
   TOKEN_UNIQUE,
   TOKEN_JOIN,
   TOKEN_INNER,
-  TOKEN_LEFT
+  TOKEN_LEFT,
+  TOKEN_STRICT
 } TokenType;
 
 typedef struct {
@@ -98,6 +99,7 @@ typedef struct {
 typedef struct {
   char name[MAX_TABLE_NAME_LEN];
   ArrayList columns;
+  bool strict;
 } TableDef;
 
 typedef enum {
@@ -261,6 +263,7 @@ typedef enum {
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
   ArrayList columns;
+  bool strict;
 } CreateTableNode;
 
 typedef struct {
@@ -324,114 +327,6 @@ typedef struct ASTNode {
   struct ASTNode *next;
 } ASTNode;
 
-typedef enum {
-  IR_CREATE_TABLE,
-  IR_INSERT_ROW,
-  IR_SCAN_TABLE,
-  IR_DROP_TABLE,
-  IR_UPDATE_ROW,
-  IR_DELETE_ROW,
-  IR_FILTER,
-  IR_AGGREGATE,
-  IR_PROJECT,
-  IR_SORT,
-  IR_CREATE_INDEX,
-  IR_DROP_INDEX,
-  IR_JOIN
-} IRType;
-
-typedef struct {
-  char table_name[MAX_TABLE_NAME_LEN];
-  ArrayList columns;
-} IRCreateTable;
-
-typedef struct {
-  uint8_t table_id;
-  ArrayList values;
-} IRInsertRow;
-
-typedef struct {
-  uint8_t table_id;
-} IRScanTable;
-
-typedef struct {
-  uint8_t table_id;
-} IRDropTable;
-
-typedef struct {
-  uint8_t table_id;
-  ArrayList values;
-  Expr *where_clause;
-} IRUpdateRow;
-
-typedef struct {
-  uint8_t table_id;
-  Expr *where_clause;
-} IRDeleteRow;
-
-typedef struct {
-  uint8_t table_id;
-  Expr *filter_expr;
-} IRFilter;
-
-typedef struct {
-  uint8_t table_id;
-  AggFuncType func_type;
-  Expr *operand;
-  bool distinct;
-  bool count_all;
-} IRAggregate;
-
-typedef struct {
-  uint8_t table_id;
-  ArrayList expressions;
-  int limit;
-} IRProject;
-
-typedef struct {
-  uint8_t table_id;
-  ArrayList order_by;
-  ArrayList order_by_desc;
-} IRSort;
-
-typedef struct {
-  uint8_t table_id;
-  char column_name[MAX_COLUMN_NAME_LEN];
-  char index_name[MAX_TABLE_NAME_LEN];
-} IRCreateIndex;
-
-typedef struct {
-  uint8_t table_id;
-  char index_name[MAX_TABLE_NAME_LEN];
-} IRDropIndex;
-
-typedef struct {
-  int left_table_id;
-  int right_table_id;
-  JoinType type;
-  Expr* condition;
-} IRJoin;
-
-typedef struct IRNode {
-  IRType type;
-  union {
-    IRCreateTable create_table;
-    IRInsertRow insert_row;
-    IRScanTable scan_table;
-    IRDropTable drop_table;
-    IRUpdateRow update_row;
-    IRDeleteRow delete_row;
-    IRFilter filter;
-    IRAggregate aggregate;
-    IRProject project;
-    IRSort sort;
-    IRCreateIndex create_index;
-    IRDropIndex drop_index;
-    IRJoin join;
-  };
-  struct IRNode *next;
-} IRNode;
-
 typedef struct Row {
   Value *values;
   int value_count;
@@ -492,14 +387,10 @@ ASTNode *parse_with_context(ParseContext *ctx, Token *tokens);
 ASTNode *parse(Token *tokens);
 ASTNode *parse_ex(const char *input, Token *tokens);
 ParseContext *parse_get_context(void);
-IRNode *ast_to_ir(ASTNode *ast);
-void exec_ir(IRNode *ir);
+void exec_ast(ASTNode *ast);
 void free_tokens(Token *tokens);
 void free_ast(ASTNode *ast);
-void free_ir(IRNode *ir);
 
-void exec_create_index(const IRNode *current);
-void exec_drop_index(const IRNode *current);
 void index_table_column(const char *table_name, const char *column_name,
                         const char *index_name);
 void drop_index_by_name(const char *index_name);

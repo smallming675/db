@@ -3,6 +3,7 @@
 #include "arraylist.h"
 #include "table.h"
 #include <unistd.h>
+#include <stdio.h>
 
 static void print_usage(void) {
     printf("Usage: db [OPTIONS]\n");
@@ -138,24 +139,13 @@ int main(int argc, char* argv[]) {
             continue;
         }
         log_msg(LOG_DEBUG, "Parsing completed successfully");
-        
-        log_msg(LOG_DEBUG, "Generating IR");
-        IRNode* ir = ast_to_ir(ast);
-        if (!ir) {
-            log_msg(LOG_ERROR, "IR generation failed for input: '%s'", input);
-            free_tokens(tokens);
-            free_ast(ast);
-            continue;
-        }
-        log_msg(LOG_DEBUG, "IR generation completed successfully");
-        
-        log_msg(LOG_DEBUG, "Executing IR");
-        exec_ir(ir);
-        log_msg(LOG_DEBUG, "IR execution completed");
-        
+
+        log_msg(LOG_DEBUG, "Executing AST");
+        exec_ast(ast);
+        log_msg(LOG_DEBUG, "AST execution completed");
+
         free_tokens(tokens);
         free_ast(ast);
-        free_ir(ir);
     }
     
     log_msg(LOG_INFO, "Database system shutting down");

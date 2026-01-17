@@ -48,7 +48,6 @@ test: $(TEST_TARGET)
 	@echo "Running tests..."
 	./$(TEST_TARGET) --all
 
-
 help:
 	@echo "Available targets:"
 	@echo "  all     - Build the database system (default)"

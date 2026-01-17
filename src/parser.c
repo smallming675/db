@@ -634,7 +634,9 @@ static bool expect(ParseContext* ctx, TokenType type, const char* context) {
 static DataType parse_data_type(ParseContext* ctx) {
     if (consume(ctx, TOKEN_KEYWORD)) {
         if (strcasecmp(current_token[-1].value, "INT") == 0) return TYPE_INT;
+        if (strcasecmp(current_token[-1].value, "INTEGER") == 0) return TYPE_INT;
         if (strcasecmp(current_token[-1].value, "STRING") == 0) return TYPE_STRING;
+        if (strcasecmp(current_token[-1].value, "TEXT") == 0) return TYPE_STRING;
         if (strcasecmp(current_token[-1].value, "FLOAT") == 0) return TYPE_FLOAT;
     } else if (consume(ctx, TOKEN_DATE)) {
         return TYPE_DATE;
@@ -816,6 +818,12 @@ static ASTNode* parse_create_table(ParseContext* ctx) {
     if (!expect(ctx, TOKEN_RPAREN, "CREATE TABLE")) {
         free(node);
         return NULL;
+    }
+
+    node->create_table.strict = false;
+    if (match(TOKEN_STRICT)) {
+        node->create_table.strict = true;
+        log_msg(LOG_DEBUG, "parse_create_table: STRICT mode enabled");
     }
 
     log_msg(LOG_DEBUG, "parse_create_table: Successfully parsed CREATE TABLE with %d columns",
@@ -1107,7 +1115,7 @@ static Expr* parse_primary(ParseContext* ctx) {
     } else if (match(TOKEN_AGGREGATE_FUNC)) {
         free(expr);
         return parse_aggregate_func(ctx);
-    } else if (match(TOKEN_SCALAR_FUNC)) {
+    } else if (match(TOKEN_SCALAR_FUNC) || match(TOKEN_LEFT)) {
         free(expr);
         return parse_scalar_func(ctx);
     } else if (match(TOKEN_LPAREN)) {
@@ -1450,7 +1458,7 @@ static ASTNode* parse_select(ParseContext* ctx) {
         while (true) {
             if (match(TOKEN_IDENTIFIER) ||
                 (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "FROM") != 0) ||
-                match(TOKEN_AGGREGATE_FUNC) || match(TOKEN_SCALAR_FUNC)) {
+                match(TOKEN_AGGREGATE_FUNC) || match(TOKEN_SCALAR_FUNC) || match(TOKEN_LEFT)) {
                 Expr* expr = parse_or_expr(ctx);
                 if (!expr) {
                     log_msg(LOG_ERROR, "parse_select: Failed to parse expression");
