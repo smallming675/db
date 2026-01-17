@@ -26,6 +26,7 @@ static void free_row_contents(void* ptr) {
     free(row->values);
 }
 
+static Value get_column_value_by_index(const Row* row, const TableDef* schema, int col_idx);
 static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name);
 static Value get_column_value_from_join(const Row* row, const TableDef* left_schema, 
                                          const TableDef* right_schema, int left_col_count,
@@ -37,8 +38,6 @@ static bool eval_expression_for_join(const Expr* expr, const Row* row,
                                       int left_col_count);
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema);
 static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
-static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema);
-static Value eval_string_function(const Expr* expr, const Row* row, const TableDef* schema);
 static void exec_create_table_ast(ASTNode* ast);
 static void exec_insert_row_ast(ASTNode* ast);
 static uint16_t exec_join_ast(ASTNode* ast);
@@ -51,6 +50,71 @@ static void exec_delete_row_ast(ASTNode* ast);
 static void exec_create_index_ast(ASTNode* ast);
 static void exec_drop_index_ast(ASTNode* ast);
 
+static Value get_column_value_by_index(const Row* row, const TableDef* schema, int col_idx) {
+    (void)schema;
+    Value val;
+    val.type = TYPE_NULL;
+    val.char_val = NULL;
+
+    if (col_idx >= 0 && col_idx < row->value_count) {
+        val = row->values[col_idx];
+    }
+    return val;
+}
+
+static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name) {
+    Value val;
+    val.type = TYPE_NULL;
+    val.char_val = NULL;
+
+    int col_count = alist_length(&schema->columns);
+    for (int i = 0; i < col_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&schema->columns, i);
+        if (col && strcmp(col->name, column_name) == 0) {
+            return get_column_value_by_index(row, schema, i);
+        }
+    }
+    log_msg(LOG_WARN, "get_column_value: Column '%s' not found in schema", column_name);
+    return val;
+}
+
+static Value get_column_value_from_join(const Row* row, const TableDef* left_schema, 
+                                         const TableDef* right_schema, int left_col_count,
+                                         const char* column_name) {
+    Value val;
+    val.type = TYPE_NULL;
+    val.char_val = NULL;
+
+    int left_col_idx = -1;
+    for (int i = 0; i < alist_length(&left_schema->columns); i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&left_schema->columns, i);
+        if (col && strcmp(col->name, column_name) == 0) {
+            left_col_idx = i;
+            break;
+        }
+    }
+
+    if (left_col_idx >= 0 && left_col_idx < left_col_count) {
+        return get_column_value_by_index(row, left_schema, left_col_idx);
+    }
+
+    int right_col_idx = -1;
+    for (int i = 0; i < alist_length(&right_schema->columns); i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&right_schema->columns, i);
+        if (col && strcmp(col->name, column_name) == 0) {
+            right_col_idx = i;
+            break;
+        }
+    }
+
+    if (right_col_idx >= 0) {
+        int actual_idx = left_col_count + right_col_idx;
+        return get_column_value_by_index(row, NULL, actual_idx);
+    }
+
+    return val;
+}
+
 static bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
     if (!expr) return true;
 
@@ -59,9 +123,8 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
             Value val = get_column_value(row, schema, expr->column_name);
             return !is_null(&val);
         }
-        case EXPR_VALUE: {
+        case EXPR_VALUE:
             return !is_null(&expr->value);
-        }
         case EXPR_BINARY_OP: {
             bool left_val = eval_expression(expr->binary.left, row, schema);
             bool right_val = eval_expression(expr->binary.right, row, schema);
@@ -77,23 +140,14 @@ static bool eval_expression(const Expr* expr, const Row* row, const TableDef* sc
                 case OP_LESS_EQUAL:
                 case OP_GREATER:
                 case OP_GREATER_EQUAL: {
-                    if (expr->binary.left->type == EXPR_COLUMN &&
-                        expr->binary.right->type == EXPR_VALUE) {
-                        Value col_val =
-                            get_column_value(row, schema, expr->binary.left->column_name);
-                        return eval_comparison(col_val, expr->binary.right->value, expr->binary.op);
-                    } else if (expr->binary.left->type == EXPR_VALUE &&
-                               expr->binary.right->type == EXPR_COLUMN) {
-                        Value col_val =
-                            get_column_value(row, schema, expr->binary.right->column_name);
-                        return eval_comparison(expr->binary.left->value, col_val, expr->binary.op);
-                    } else if (expr->binary.left->type == EXPR_COLUMN &&
-                               expr->binary.right->type == EXPR_COLUMN) {
-                        Value left_val =
-                            get_column_value(row, schema, expr->binary.left->column_name);
-                        Value right_val =
-                            get_column_value(row, schema, expr->binary.right->column_name);
-                        return eval_comparison(left_val, right_val, expr->binary.op);
+                    Expr* left = expr->binary.left;
+                    Expr* right = expr->binary.right;
+                    if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
+                        return eval_comparison(get_column_value(row, schema, left->column_name), right->value, expr->binary.op);
+                    } else if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
+                        return eval_comparison(left->value, get_column_value(row, schema, right->column_name), expr->binary.op);
+                    } else if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
+                        return eval_comparison(get_column_value(row, schema, left->column_name), get_column_value(row, schema, right->column_name), expr->binary.op);
                     }
                     return false;
                 }
@@ -124,9 +178,8 @@ static bool eval_expression_for_join(const Expr* expr, const Row* row,
             Value val = get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->column_name);
             return !is_null(&val);
         }
-        case EXPR_VALUE: {
+        case EXPR_VALUE:
             return !is_null(&expr->value);
-        }
         case EXPR_BINARY_OP: {
             bool left_val = eval_expression_for_join(expr->binary.left, row, left_schema, right_schema, left_col_count);
             bool right_val = eval_expression_for_join(expr->binary.right, row, left_schema, right_schema, left_col_count);
@@ -142,19 +195,14 @@ static bool eval_expression_for_join(const Expr* expr, const Row* row,
                 case OP_LESS_EQUAL:
                 case OP_GREATER:
                 case OP_GREATER_EQUAL: {
-                    if (expr->binary.left->type == EXPR_COLUMN &&
-                        expr->binary.right->type == EXPR_VALUE) {
-                        Value col_val = get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.left->column_name);
-                        return eval_comparison(col_val, expr->binary.right->value, expr->binary.op);
-                    } else if (expr->binary.left->type == EXPR_VALUE &&
-                               expr->binary.right->type == EXPR_COLUMN) {
-                        Value col_val = get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.right->column_name);
-                        return eval_comparison(expr->binary.left->value, col_val, expr->binary.op);
-                    } else if (expr->binary.left->type == EXPR_COLUMN &&
-                               expr->binary.right->type == EXPR_COLUMN) {
-                        Value left_val = get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.left->column_name);
-                        Value right_val = get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->binary.right->column_name);
-                        return eval_comparison(left_val, right_val, expr->binary.op);
+                    Expr* left = expr->binary.left;
+                    Expr* right = expr->binary.right;
+                    if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
+                        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema, left_col_count, left->column_name), right->value, expr->binary.op);
+                    } else if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
+                        return eval_comparison(left->value, get_column_value_from_join(row, left_schema, right_schema, left_col_count, right->column_name), expr->binary.op);
+                    } else if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
+                        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema, left_col_count, left->column_name), get_column_value_from_join(row, left_schema, right_schema, left_col_count, right->column_name), expr->binary.op);
                     }
                     return false;
                 }
@@ -174,174 +222,28 @@ static bool eval_expression_for_join(const Expr* expr, const Row* row,
     }
 }
 
-static Value get_column_value_from_join(const Row* row, const TableDef* left_schema, 
-                                         const TableDef* right_schema, int left_col_count,
-                                         const char* column_name) {
-    Value val;
-    val.type = TYPE_NULL;
-    val.char_val = NULL;
-
-    int left_col_idx = -1;
-    for (int i = 0; i < alist_length(&left_schema->columns); i++) {
-        ColumnDef* col = (ColumnDef*)alist_get(&left_schema->columns, i);
-        if (col && strcmp(col->name, column_name) == 0) {
-            left_col_idx = i;
-            break;
-        }
+static Value copy_string_value(const Value* src) {
+    Value copy = *src;
+    if (src->type == TYPE_STRING && src->char_val) {
+        copy.char_val = malloc(strlen(src->char_val) + 1);
+        strcpy(copy.char_val, src->char_val);
     }
-
-    if (left_col_idx >= 0 && left_col_idx < row->value_count && left_col_idx < left_col_count) {
-        val = row->values[left_col_idx];
-        return val;
-    }
-
-    int right_col_idx = -1;
-    for (int i = 0; i < alist_length(&right_schema->columns); i++) {
-        ColumnDef* col = (ColumnDef*)alist_get(&right_schema->columns, i);
-        if (col && strcmp(col->name, column_name) == 0) {
-            right_col_idx = i;
-            break;
-        }
-    }
-
-    if (right_col_idx >= 0) {
-        int actual_idx = left_col_count + right_col_idx;
-        if (actual_idx < row->value_count) {
-            val = row->values[actual_idx];
-        }
-    }
-
-    return val;
-}
-
-static Value get_column_value(const Row* row, const TableDef* schema, const char* column_name) {
-    Value val;
-    val.type = TYPE_NULL;
-    val.char_val = NULL;
-
-    int col_count = alist_length(&schema->columns);
-
-    for (int i = 0; i < col_count; i++) {
-        ColumnDef* col = (ColumnDef*)alist_get(&schema->columns, i);
-        if (col && strcmp(col->name, column_name) == 0) {
-            if (i < row->value_count) {
-                val = row->values[i];
-            } else {
-                log_msg(LOG_WARN, "get_column_value: Column '%s' index %d out of range for row with %d values",
-                        column_name, i, row->value_count);
-            }
-            return val;
-        }
-    }
-
-    log_msg(LOG_WARN, "get_column_value: Column '%s' not found in schema", column_name);
-    return val;
-}
-
-static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema) {
-    Value result = eval_math_function(expr, row, schema);
-    if (result.type != TYPE_ERROR) {
-        return result;
-    }
-
-    result = eval_string_function(expr, row, schema);
-    if (result.type != TYPE_ERROR) {
-        return result;
-    }
-
-    log_msg(LOG_ERROR, "eval_scalar_function: Unknown scalar function with type %d",
-            expr->scalar.func_type);
-    return VAL_ERROR;
-}
-
-static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema) {
-    Value arg;
-    arg.type = TYPE_NULL;
-    arg.char_val = NULL;
-    if (expr->scalar.arg_count > 0) {
-        arg = eval_select_expression(expr->scalar.args[0], row, schema);
-    }
-
-    if (arg.type == TYPE_NULL) {
-        Value null_result;
-        null_result.type = TYPE_NULL;
-        null_result.char_val = NULL;
-        return null_result;
-    }
-
-    Value result;
-    result.type = TYPE_ERROR;
-    result.char_val = NULL;
-
-    switch (expr->scalar.func_type) {
-        case FUNC_ABS:
-            if (arg.type == TYPE_INT) {
-                result.type = TYPE_INT;
-                result.int_val = abs(arg.int_val);
-            } else if (arg.type == TYPE_FLOAT) {
-                result.type = TYPE_FLOAT;
-                result.float_val = fabs(arg.float_val);
-            }
-            break;
-        case FUNC_SQRT:
-            if (arg.type == TYPE_INT || arg.type == TYPE_FLOAT) {
-                result.type = TYPE_FLOAT;
-                result.float_val = sqrt(arg.type == TYPE_INT ? (double)arg.int_val : arg.float_val);
-            }
-            break;
-        case FUNC_MOD:
-            if (arg.type == TYPE_INT) {
-                result.type = TYPE_INT;
-                result.int_val = arg.int_val % 10;
-            }
-            break;
-        case FUNC_POW:
-            if (arg.type == TYPE_INT || arg.type == TYPE_FLOAT) {
-                result.type = TYPE_FLOAT;
-                result.float_val = pow(arg.type == TYPE_INT ? (double)arg.int_val : arg.float_val, 2.0);
-            }
-            break;
-        case FUNC_ROUND:
-            if (arg.type == TYPE_FLOAT) {
-                result.type = TYPE_FLOAT;
-                result.float_val = round(arg.float_val);
-            }
-            break;
-        case FUNC_FLOOR:
-            if (arg.type == TYPE_FLOAT) {
-                result.type = TYPE_FLOAT;
-                result.float_val = floor(arg.float_val);
-            }
-            break;
-        case FUNC_CEIL:
-            if (arg.type == TYPE_FLOAT) {
-                result.type = TYPE_FLOAT;
-                result.float_val = ceil(arg.float_val);
-            }
-            break;
-        default:
-            break;
-    }
-
-    return result;
+    return copy;
 }
 
 static Value eval_string_function(const Expr* expr, const Row* row, const TableDef* schema) {
-    Value arg1;
-    arg1.type = TYPE_NULL;
-    arg1.char_val = NULL;
+    Value arg1 = {0};
     if (expr->scalar.arg_count > 0) {
         arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
     }
 
     if (arg1.type == TYPE_NULL) {
-        Value null_result;
+        Value null_result = {0};
         null_result.type = TYPE_NULL;
-        null_result.char_val = NULL;
         return null_result;
     }
 
-    Value result;
+    Value result = {0};
     result.type = TYPE_ERROR;
     result.char_val = NULL;
 
@@ -374,11 +276,7 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
         }
         case FUNC_LEN: {
             result.type = TYPE_INT;
-            if (arg1.type == TYPE_STRING && arg1.char_val) {
-                result.int_val = strlen(arg1.char_val);
-            } else {
-                result.int_val = 0;
-            }
+            result.int_val = (arg1.type == TYPE_STRING && arg1.char_val) ? strlen(arg1.char_val) : 0;
             break;
         }
         case FUNC_MID: {
@@ -464,8 +362,86 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
     return result;
 }
 
+static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema) {
+    Value arg = {0};
+    if (expr->scalar.arg_count > 0) {
+        arg = eval_select_expression(expr->scalar.args[0], row, schema);
+    }
+
+    if (arg.type == TYPE_NULL) {
+        Value null_result = {0};
+        null_result.type = TYPE_NULL;
+        return null_result;
+    }
+
+    Value result = {0};
+    result.type = TYPE_ERROR;
+    result.char_val = NULL;
+
+    switch (expr->scalar.func_type) {
+        case FUNC_ABS:
+            if (arg.type == TYPE_INT) {
+                result.type = TYPE_INT;
+                result.int_val = abs(arg.int_val);
+            } else if (arg.type == TYPE_FLOAT) {
+                result.type = TYPE_FLOAT;
+                result.float_val = fabs(arg.float_val);
+            }
+            break;
+        case FUNC_SQRT:
+            if (arg.type == TYPE_INT || arg.type == TYPE_FLOAT) {
+                result.type = TYPE_FLOAT;
+                result.float_val = sqrt(arg.type == TYPE_INT ? (double)arg.int_val : arg.float_val);
+            }
+            break;
+        case FUNC_MOD:
+            if (arg.type == TYPE_INT) {
+                result.type = TYPE_INT;
+                result.int_val = arg.int_val % 10;
+            }
+            break;
+        case FUNC_POW:
+            if (arg.type == TYPE_INT || arg.type == TYPE_FLOAT) {
+                result.type = TYPE_FLOAT;
+                result.float_val = pow(arg.type == TYPE_INT ? (double)arg.int_val : arg.float_val, 2.0);
+            }
+            break;
+        case FUNC_ROUND:
+            if (arg.type == TYPE_FLOAT) {
+                result.type = TYPE_FLOAT;
+                result.float_val = round(arg.float_val);
+            }
+            break;
+        case FUNC_FLOOR:
+            if (arg.type == TYPE_FLOAT) {
+                result.type = TYPE_FLOAT;
+                result.float_val = floor(arg.float_val);
+            }
+            break;
+        case FUNC_CEIL:
+            if (arg.type == TYPE_FLOAT) {
+                result.type = TYPE_FLOAT;
+                result.float_val = ceil(arg.float_val);
+            }
+            break;
+        default:
+            break;
+    }
+
+    return result;
+}
+
+static Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema) {
+    Value result = eval_math_function(expr, row, schema);
+    if (result.type != TYPE_ERROR) {
+        return result;
+    }
+
+    return eval_string_function(expr, row, schema);
+}
+
 static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
-    Value result;
+    Value result = {0};
     result.type = TYPE_NULL;
     result.char_val = NULL;
 
@@ -473,17 +449,13 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
 
     switch (expr->type) {
         case EXPR_COLUMN:
-            result = get_column_value(row, schema, expr->column_name);
-            break;
-
+            return get_column_value(row, schema, expr->column_name);
         case EXPR_VALUE:
-            result = expr->value;
-            break;
-
+            return copy_string_value(&expr->value);
         case EXPR_BINARY_OP: {
             Value left = eval_select_expression(expr->binary.left, row, schema);
             Value right = eval_select_expression(expr->binary.right, row, schema);
-            result.type = TYPE_FLOAT;
+            bool cmp_result = eval_comparison(left, right, expr->binary.op);
 
             switch (expr->binary.op) {
                 case OP_ADD:
@@ -491,6 +463,7 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
                         result.type = TYPE_INT;
                         result.int_val = left.int_val + right.int_val;
                     } else {
+                        result.type = TYPE_FLOAT;
                         double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
                         double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
                         result.float_val = l + r;
@@ -501,6 +474,7 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
                         result.type = TYPE_INT;
                         result.int_val = left.int_val - right.int_val;
                     } else {
+                        result.type = TYPE_FLOAT;
                         double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
                         double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
                         result.float_val = l - r;
@@ -511,23 +485,26 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
                         result.type = TYPE_INT;
                         result.int_val = left.int_val * right.int_val;
                     } else {
+                        result.type = TYPE_FLOAT;
                         double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
                         double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
                         result.float_val = l * r;
                     }
                     break;
-                case OP_DIVIDE:
-                    if (right.type == TYPE_INT ? right.int_val : right.float_val != 0) {
+                case OP_DIVIDE: {
+                    double denom = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
+                    if (denom != 0) {
                         if (left.type == TYPE_INT && right.type == TYPE_INT) {
                             result.type = TYPE_INT;
                             result.int_val = left.int_val / right.int_val;
                         } else {
+                            result.type = TYPE_FLOAT;
                             double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
-                            double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
-                            result.float_val = l / r;
+                            result.float_val = l / denom;
                         }
                     }
                     break;
+                }
                 case OP_MODULUS:
                     if (left.type == TYPE_INT && right.type == TYPE_INT) {
                         result.type = TYPE_INT;
@@ -535,93 +512,16 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
                     }
                     break;
                 case OP_EQUALS:
-                    result = convert_value(&left, TYPE_INT);
-                    if (right.type == TYPE_INT) {
-                        result.int_val = (result.int_val == right.int_val);
-                    } else if (right.type == TYPE_FLOAT) {
-                        result.float_val = (result.int_val == right.float_val);
-                    }
-                    result.type = TYPE_INT;
-                    break;
                 case OP_NOT_EQUALS:
-                    result = convert_value(&left, TYPE_INT);
-                    if (right.type == TYPE_INT) {
-                        result.int_val = (result.int_val != right.int_val);
-                    } else if (right.type == TYPE_FLOAT) {
-                        result.float_val = (result.int_val != right.float_val);
-                    }
-                    result.type = TYPE_INT;
-                    break;
                 case OP_LESS:
-                    result = convert_value(&left, TYPE_INT);
-                    if (right.type == TYPE_INT) {
-                        result.int_val = (result.int_val < right.int_val);
-                    } else if (right.type == TYPE_FLOAT) {
-                        result.float_val = (result.int_val < right.float_val);
-                    }
-                    result.type = TYPE_INT;
-                    break;
                 case OP_LESS_EQUAL:
-                    result = convert_value(&left, TYPE_INT);
-                    if (right.type == TYPE_INT) {
-                        result.int_val = (result.int_val <= right.int_val);
-                    } else if (right.type == TYPE_FLOAT) {
-                        result.float_val = (result.int_val <= right.float_val);
-                    }
-                    result.type = TYPE_INT;
-                    break;
                 case OP_GREATER:
-                    result = convert_value(&left, TYPE_INT);
-                    if (right.type == TYPE_INT) {
-                        result.int_val = (result.int_val > right.int_val);
-                    } else if (right.type == TYPE_FLOAT) {
-                        result.float_val = (result.int_val > right.float_val);
-                    }
-                    result.type = TYPE_INT;
-                    break;
                 case OP_GREATER_EQUAL:
-                    result = convert_value(&left, TYPE_INT);
-                    if (right.type == TYPE_INT) {
-                        result.int_val = (result.int_val >= right.int_val);
-                    } else if (right.type == TYPE_FLOAT) {
-                        result.float_val = (result.int_val >= right.float_val);
-                    }
-                    result.type = TYPE_INT;
-                    break;
                 case OP_LIKE:
-                    result.type = TYPE_INT;
-                    result.int_val = 0;
-                    if (left.type == TYPE_STRING && left.char_val && right.type == TYPE_STRING && right.char_val) {
-                        char* pattern = right.char_val;
-                        char* str = left.char_val;
-                        size_t pattern_len = strlen(pattern);
-                        size_t str_len = strlen(str);
-
-                        if (pattern_len > 0 && pattern[0] == '%' && pattern_len > 1) {
-                            char* suffix = pattern + 1;
-                            size_t suffix_len = strlen(suffix);
-                            if (str_len >= suffix_len && strcmp(str + str_len - suffix_len, suffix) == 0) {
-                                result.int_val = 1;
-                            }
-                        } else if (pattern_len > 0 && pattern[pattern_len - 1] == '%' && pattern_len > 1) {
-                            char* prefix = pattern;
-                            prefix[pattern_len - 1] = '\0';
-                            size_t prefix_len = strlen(prefix);
-                            if (str_len >= prefix_len && strncmp(str, prefix, prefix_len) == 0) {
-                                result.int_val = 1;
-                            }
-                        } else if (strcmp(str, pattern) == 0) {
-                            result.int_val = 1;
-                        }
-                    }
-                    break;
                 case OP_AND:
-                    result.type = TYPE_INT;
-                    result.int_val = (left.type != TYPE_NULL && right.type != TYPE_NULL);
-                    break;
                 case OP_OR:
                     result.type = TYPE_INT;
-                    result.int_val = (left.type != TYPE_NULL || right.type != TYPE_NULL);
+                    result.int_val = cmp_result ? 1 : 0;
                     break;
                 default:
                     break;
@@ -638,21 +538,16 @@ static Value eval_select_expression(Expr* expr, const Row* row, const TableDef* 
             }
             break;
         }
-        case EXPR_AGGREGATE_FUNC: {
+        case EXPR_AGGREGATE_FUNC:
             log_msg(LOG_ERROR, "eval_select_expression: Cannot evaluate aggregate in non-aggregate context");
             break;
-        }
-        case EXPR_SCALAR_FUNC: {
-            result = eval_scalar_function(expr, row, schema);
-            break;
-        }
-        case EXPR_SUBQUERY: {
+        case EXPR_SCALAR_FUNC:
+            return eval_scalar_function(expr, row, schema);
+        case EXPR_SUBQUERY:
             log_msg(LOG_ERROR, "eval_select_expression: Subquery evaluation NOT IMPLEMENTED");
             break;
-        }
         default:
             log_msg(LOG_WARN, "eval_select_expression: Unknown expression type %d", expr->type);
-            break;
     }
 
     return result;
@@ -688,11 +583,9 @@ void exec_ast(ASTNode* ast) {
             case AST_CREATE_TABLE:
                 exec_create_table_ast(current);
                 break;
-
             case AST_INSERT_ROW:
                 exec_insert_row_ast(current);
                 break;
-
             case AST_SELECT: {
                 SelectNode* select = &current->select;
                 bool has_agg = has_aggregate_expr(current);
@@ -718,27 +611,21 @@ void exec_ast(ASTNode* ast) {
                 exec_project_ast(current, result_table_id);
                 break;
             }
-
             case AST_DROP_TABLE:
                 exec_drop_table_ast(current);
                 break;
-
             case AST_UPDATE_ROW:
                 exec_update_row_ast(current);
                 break;
-
             case AST_DELETE_ROW:
                 exec_delete_row_ast(current);
                 break;
-
             case AST_CREATE_INDEX:
                 exec_create_index_ast(current);
                 break;
-
             case AST_DROP_INDEX:
                 exec_drop_index_ast(current);
                 break;
-
             default:
                 log_msg(LOG_WARN, "exec_ast: Unknown AST node type: %d", current->type);
                 break;
@@ -820,11 +707,7 @@ static void exec_insert_row_ast(ASTNode* ast) {
     for (int i = 0; i < value_count; i++) {
         ColumnValue* cv = (ColumnValue*)alist_get(&ins->values, i);
         if (cv) {
-            row->values[i] = cv->value;
-            if (cv->value.type == TYPE_STRING) {
-                row->values[i].char_val = malloc(strlen(cv->value.char_val) + 1);
-                strcpy(row->values[i].char_val, cv->value.char_val);
-            }
+            row->values[i] = copy_string_value(&cv->value);
         }
     }
 
@@ -984,7 +867,7 @@ static void exec_aggregate_ast(ASTNode* ast, uint8_t table_id) {
         Expr* operand = (*expr)->aggregate.operand;
         bool count_all = (*expr)->aggregate.count_all;
 
-        Value result;
+        Value result = {0};
         result.type = TYPE_FLOAT;
         result.char_val = NULL;
 
@@ -1082,8 +965,37 @@ static void exec_aggregate_ast(ASTNode* ast, uint8_t table_id) {
     }
 
     alist_destroy(&filtered_indices);
-
     log_msg(LOG_INFO, "Aggregated table '%s' to 1 row", table->name);
+}
+
+static void print_result_row(const Value* values, int col_count) {
+    for (int j = 0; j < col_count; j++) {
+        Value* val = (Value*)&values[j];
+        printf("%-20s", val->type == TYPE_NULL ? "NULL" : repr(val));
+    }
+    printf("\n");
+}
+
+static void print_column_headers(SelectNode* select, Table* table, bool is_select_star, int col_count) {
+    if (is_select_star) {
+        for (int j = 0; j < col_count; j++) {
+            ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, j);
+            printf("%-20s", col ? col->name : "unknown");
+        }
+    } else {
+        for (int i = 0; i < col_count; i++) {
+            Expr** expr = (Expr**)alist_get(&select->expressions, i);
+            const char* alias = expr[0]->alias;
+            if (alias[0]) {
+                printf("%-20s", alias);
+            } else if (expr[0]->type == EXPR_COLUMN) {
+                printf("%-20s", expr[0]->column_name);
+            } else {
+                printf("%-20s", "expr");
+            }
+        }
+    }
+    printf("\n");
 }
 
 static void exec_project_ast(ASTNode* ast, uint8_t table_id) {
@@ -1100,7 +1012,6 @@ static void exec_project_ast(ASTNode* ast, uint8_t table_id) {
                            strcmp(first_expr[0]->value.char_val, "*") == 0);
 
     int col_count = is_select_star ? alist_length(&table->schema.columns) : expr_count;
-
     if (col_count <= 0) return;
 
     free_query_result(g_last_result);
@@ -1146,19 +1057,18 @@ static void exec_project_ast(ASTNode* ast, uint8_t table_id) {
 
             for (int j = 0; j < col_count && j < agg_count; j++) {
                 Value* agg_val = (Value*)alist_get(&g_aggregate_results, j);
+                Value val;
                 if (agg_val) {
-                    Value val = *agg_val;
-                    if (val.type == TYPE_STRING && val.char_val) {
-                        val.char_val = malloc(strlen(val.char_val) + 1);
-                        strcpy(val.char_val, agg_val->char_val);
-                    }
-                    g_last_result->values[g_last_result->row_count * col_count + j] = val;
+                    val = copy_string_value(agg_val);
                 } else {
-                    Value null_val;
-                    null_val.type = TYPE_NULL;
-                    null_val.char_val = NULL;
-                    g_last_result->values[g_last_result->row_count * col_count + j] = null_val;
+                    val.type = TYPE_NULL;
+                    val.char_val = NULL;
+                    val.int_val = 0;
+                    val.float_val = 0;
+                    val.date_val.date_val = 0;
+                    val.time_val.time_val = 0;
                 }
+                g_last_result->values[g_last_result->row_count * col_count + j] = val;
             }
             g_last_result->rows[g_last_result->row_count] = i;
             g_last_result->row_count++;
@@ -1186,16 +1096,10 @@ static void exec_project_ast(ASTNode* ast, uint8_t table_id) {
             for (int j = 0; j < col_count; j++) {
                 Value val;
                 if (is_select_star) {
-                    val = row->values[j];
-                    if (val.type == TYPE_STRING && val.char_val) {
-                        val.char_val = malloc(strlen(val.char_val) + 1);
-                        strcpy(val.char_val, row->values[j].char_val);
-                    }
+                    val = copy_string_value(&row->values[j]);
                 } else {
                     Expr** expr = (Expr**)alist_get(&select->expressions, j);
                     val = eval_select_expression(expr[0], row, &table->schema);
-                    if (val.type == TYPE_STRING && val.char_val) {
-                    }
                 }
                 g_last_result->values[g_last_result->row_count * col_count + j] = val;
             }
@@ -1205,40 +1109,12 @@ static void exec_project_ast(ASTNode* ast, uint8_t table_id) {
     }
 
     printf("\n");
-    if (is_select_star) {
-        for (int j = 0; j < col_count; j++) {
-            ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, j);
-            if (col) {
-                printf("%-20s", col->name);
-            }
-        }
-    } else {
-        for (int i = 0; i < col_count; i++) {
-            Expr** expr = (Expr**)alist_get(&select->expressions, i);
-            const char* alias = expr[0]->alias;
-            if (alias[0]) {
-                printf("%-20s", alias);
-            } else if (expr[0]->type == EXPR_COLUMN) {
-                printf("%-20s", expr[0]->column_name);
-            } else {
-                printf("%-20s", "expr");
-            }
-        }
-    }
-    printf("\n");
+    print_column_headers(select, table, is_select_star, col_count);
     for (int i = 0; i < col_count * 20; i++) printf("-");
     printf("\n");
 
     for (int i = 0; i < g_last_result->row_count; i++) {
-        for (int j = 0; j < col_count; j++) {
-            Value* val = &g_last_result->values[i * col_count + j];
-            if (val->type == TYPE_NULL) {
-                printf("%-20s", "NULL");
-            } else {
-                printf("%-20s", repr(val));
-            }
-        }
-        printf("\n");
+        print_result_row(&g_last_result->values[i * col_count], col_count);
     }
 
     log_msg(LOG_INFO, "Projected %d rows from table '%s'", g_last_result->row_count, table->name);
@@ -1287,11 +1163,7 @@ static void exec_update_row_ast(ASTNode* ast) {
                             if (row->values[k].type == TYPE_STRING && row->values[k].char_val) {
                                 free(row->values[k].char_val);
                             }
-                            row->values[k] = cv->value;
-                            if (cv->value.type == TYPE_STRING) {
-                                row->values[k].char_val = malloc(strlen(cv->value.char_val) + 1);
-                                strcpy(row->values[k].char_val, cv->value.char_val);
-                            }
+                            row->values[k] = copy_string_value(&cv->value);
                             break;
                         }
                     }
