@@ -78,7 +78,7 @@ void exec_ast(ASTNode* ast) {
     log_msg(LOG_DEBUG, "exec_ast: executing AST");
 
     g_in_aggregate_context = false;
-    alist_init(&g_aggregate_results, sizeof(Value), free_value);
+    alist_init(&g_aggregate_results, sizeof(Value), NULL);
 
     ASTNode* current = ast;
     while (current) {
@@ -443,10 +443,9 @@ static void exec_aggregate_ast(ASTNode* ast, uint8_t table_id) {
                 result.float_val = 0;
         }
 
-        Value* result_copy = (Value*)malloc(sizeof(Value));
-        *result_copy = result;
+        Value result_copy = result;
         void* slot = alist_append(&g_aggregate_results);
-        *(Value**)slot = result_copy;
+        *(Value*)slot = result_copy;
     }
 
     alist_destroy(&filtered_indices);

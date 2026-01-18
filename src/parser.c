@@ -965,6 +965,7 @@ static Expr* parse_aggregate_func(ParseContext* ctx) {
         return NULL;
     }
 
+    memset(expr, 0, sizeof(Expr));
     expr->type = EXPR_AGGREGATE_FUNC;
 
     if (strcasecmp(current_token->value, "COUNT") == 0) {
