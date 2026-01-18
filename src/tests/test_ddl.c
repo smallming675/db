@@ -83,3 +83,43 @@ void test_create_table_multiple_columns(void) {
 
     log_msg(LOG_INFO, "CREATE TABLE with multiple columns tests passed");
 }
+
+void test_create_table_new_types(void) {
+    log_msg(LOG_INFO, "Testing CREATE TABLE with new data types...");
+
+    reset_database();
+
+    exec("CREATE TABLE new_types_table ("
+         "id INT, "
+         "active BOOLEAN, "
+         "price DECIMAL, "
+         "balance NUMERIC, "
+         "image BLOB"
+         ");");
+
+    Table* table = find_table_by_name("new_types_table");
+    assert_ptr_not_null(table, "Table should exist");
+    assert_int_eq(5, alist_length(&table->schema.columns), "Table should have 5 columns");
+
+    ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, 0);
+    assert_true(col && strcmp(col->name, "id") == 0, "First column should be 'id'");
+    assert_int_eq(TYPE_INT, col->type, "id should be INT type");
+
+    col = (ColumnDef*)alist_get(&table->schema.columns, 1);
+    assert_true(col && strcmp(col->name, "active") == 0, "Second column should be 'active'");
+    assert_int_eq(TYPE_BOOLEAN, col->type, "active should be BOOLEAN type");
+
+    col = (ColumnDef*)alist_get(&table->schema.columns, 2);
+    assert_true(col && strcmp(col->name, "price") == 0, "Third column should be 'price'");
+    assert_int_eq(TYPE_DECIMAL, col->type, "price should be DECIMAL type");
+
+    col = (ColumnDef*)alist_get(&table->schema.columns, 3);
+    assert_true(col && strcmp(col->name, "balance") == 0, "Fourth column should be 'balance'");
+    assert_int_eq(TYPE_DECIMAL, col->type, "balance should be NUMERIC type (DECIMAL)");
+
+    col = (ColumnDef*)alist_get(&table->schema.columns, 4);
+    assert_true(col && strcmp(col->name, "image") == 0, "Fifth column should be 'image'");
+    assert_int_eq(TYPE_BLOB, col->type, "image should be BLOB type");
+
+    log_msg(LOG_INFO, "CREATE TABLE with new data types tests passed");
+}

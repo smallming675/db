@@ -1,4 +1,5 @@
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -121,17 +122,29 @@ const char* repr(const Value* val) {
         case TYPE_FLOAT:
             snprintf(buffer, MAX_STRING_LEN, "%.2f", val->float_val);
             break;
+        case TYPE_BOOLEAN:
+            strcpy(buffer, val->bool_val ? "TRUE" : "FALSE");
+            break;
+        case TYPE_DECIMAL: {
+            int scale = val->decimal_val.scale > 0 ? val->decimal_val.scale : 2;
+            double d = (double)val->decimal_val.value / (double)pow(10, scale);
+            snprintf(buffer, MAX_STRING_LEN, "%.2f", d);
+            break;
+        }
+        case TYPE_BLOB:
+            snprintf(buffer, MAX_STRING_LEN, "<BLOB:%zu bytes>", val->blob_val.length);
+            break;
         case TYPE_STRING:
             strncpy(buffer, val->char_val, MAX_STRING_LEN - 1);
             buffer[MAX_STRING_LEN - 1] = '\0';
             break;
         case TYPE_TIME:
-            snprintf(buffer, MAX_STRING_LEN, "%02d:%02d:%02d", time_hour(val->time_val.time_val),
-                     time_minute(val->time_val.time_val), time_second(val->time_val.time_val));
+            snprintf(buffer, MAX_STRING_LEN, "%02d:%02d:%02d", time_hour(val->time_val),
+                     time_minute(val->time_val), time_second(val->time_val));
             break;
         case TYPE_DATE:
-            snprintf(buffer, MAX_STRING_LEN, "%04d-%02d-%02d", date_year(val->date_val.date_val),
-                     date_month(val->date_val.date_val), date_day(val->date_val.date_val));
+            snprintf(buffer, MAX_STRING_LEN, "%04d-%02d-%02d", date_year(val->date_val),
+                     date_month(val->date_val), date_day(val->date_val));
             break;
         case TYPE_ERROR:
             strcpy(buffer, "ERROR");
@@ -149,7 +162,7 @@ static int compare_values(const Value* left, const Value* right) {
     if (is_null(left) || is_null(right)) return 0;
 
     if (left->type == TYPE_INT && right->type == TYPE_INT) {
-        return left->int_val - right->int_val;
+        return left->int_val < right->int_val ? -1 : (left->int_val > right->int_val ? 1 : 0);
     } else if (left->type == TYPE_FLOAT && right->type == TYPE_FLOAT) {
         float left_val = left->float_val;
         float right_val = right->float_val;
@@ -170,6 +183,21 @@ static int compare_values(const Value* left, const Value* right) {
         return 0;
     }
 
+    if (left->type == TYPE_BOOLEAN && right->type == TYPE_BOOLEAN) {
+        return left->bool_val < right->bool_val ? -1 : (left->bool_val > right->bool_val ? 1 : 0);
+    }
+
+    if (left->type == TYPE_DECIMAL && right->type == TYPE_DECIMAL) {
+        if (left->decimal_val.scale == right->decimal_val.scale) {
+            return left->decimal_val.value < right->decimal_val.value ? -1 :
+                   (left->decimal_val.value > right->decimal_val.value ? 1 : 0);
+        }
+        int scale_diff = left->decimal_val.scale - right->decimal_val.scale;
+        long long left_val = left->decimal_val.value * (long long)pow(10, scale_diff > 0 ? 0 : -scale_diff);
+        long long right_val = right->decimal_val.value * (long long)pow(10, scale_diff > 0 ? -scale_diff : 0);
+        return left_val < right_val ? -1 : (left_val > right_val ? 1 : 0);
+    }
+
     if (left->type == TYPE_STRING && right->type == TYPE_STRING) {
         return strcmp(left->char_val, right->char_val);
     }
@@ -177,11 +205,21 @@ static int compare_values(const Value* left, const Value* right) {
     /* Dates and time are stored as integers, where later datetimes are always larger
        thus it can be compared directly */
     if (left->type == TYPE_DATE && right->type == TYPE_DATE) {
-        return left->date_val.date_val - right->date_val.date_val;
+        return left->date_val < right->date_val ? -1 :
+               (left->date_val > right->date_val ? 1 : 0);
     }
 
     if (left->type == TYPE_TIME && right->type == TYPE_TIME) {
-        return left->time_val.time_val - right->time_val.time_val;
+        return left->time_val < right->time_val ? -1 :
+               (left->time_val > right->time_val ? 1 : 0);
+    }
+
+    if (left->type == TYPE_BLOB && right->type == TYPE_BLOB) {
+        if (left->blob_val.length != right->blob_val.length) {
+            return left->blob_val.length < right->blob_val.length ? -1 : 1;
+        }
+        int cmp = memcmp(left->blob_val.data, right->blob_val.data, left->blob_val.length);
+        return cmp < 0 ? -1 : (cmp > 0 ? 1 : 0);
     }
 
     return 0;

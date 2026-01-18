@@ -16,6 +16,7 @@
 #define COL_FLAG_PRIMARY_KEY   (1 << 1)
 #define COL_FLAG_UNIQUE        (1 << 2)
 #define COL_FLAG_FOREIGN_KEY   (1 << 3)
+#define COL_FLAG_CHECK         (1 << 4)
 
 typedef enum {
   TOKEN_KEYWORD,
@@ -74,6 +75,9 @@ typedef enum {
   TYPE_INT,
   TYPE_STRING,
   TYPE_FLOAT,
+  TYPE_BOOLEAN,
+  TYPE_DECIMAL,
+  TYPE_BLOB,
   TYPE_TIME,
   TYPE_DATE,
   TYPE_NULL,
@@ -81,24 +85,17 @@ typedef enum {
 } DataType;
 
 typedef struct {
-  unsigned int time_val;
-} TimeValue;
-
-typedef struct {
-  unsigned int date_val;
-} DateValue;
-
-typedef struct {
   char name[MAX_COLUMN_NAME_LEN];
   char references_table[MAX_TABLE_NAME_LEN];
   char references_column[MAX_COLUMN_NAME_LEN];
   DataType type;
   unsigned int flags;
+  struct Expr *check_expr;
 } ColumnDef;
 
 typedef struct {
-  char name[MAX_TABLE_NAME_LEN];
   ArrayList columns;
+  ArrayList check_constraints;
   bool strict;
 } TableDef;
 
@@ -111,7 +108,7 @@ typedef enum {
   PARSE_ERROR_INVALID_NUMBER,
   PARSE_ERROR_UNEXPECTED_END,
   PARSE_ERROR_TOO_MANY_COLUMNS,
-  PARSE_ERROR_MAX
+PARSE_ERROR_TABLE_NOT_FOUND,
 } ParseErrorCode;
 
 typedef struct {
@@ -140,9 +137,19 @@ typedef struct {
   union {
     long long int_val;
     double float_val;
+    bool bool_val;
+    struct {
+      int precision;
+      int scale;
+      long long value;
+    } decimal_val;
+    struct {
+      size_t length;
+      unsigned char *data;
+    } blob_val;
     char *char_val;
-    TimeValue time_val;
-    DateValue date_val;
+    unsigned int time_val;
+    unsigned int date_val;
   };
 } Value;
 
@@ -269,6 +276,7 @@ typedef struct {
 typedef struct {
   uint8_t table_id;
   ArrayList value_rows;
+  ArrayList columns;
 } InsertNode;
 
 typedef struct {
@@ -292,7 +300,7 @@ typedef struct {
 
 typedef struct {
   uint8_t table_id;
-  char column_name[MAX_COLUMN_NAME_LEN];
+  int column_idx;
   char index_name[MAX_TABLE_NAME_LEN];
 } CreateIndexNode;
 
@@ -353,13 +361,12 @@ typedef struct {
 } Index;
 
 typedef struct {
+  ArrayList seen_values;
   double sum;
-  int count;
+  uint32_t count;
   Value min_val;
   Value max_val;
-  bool has_min, has_max;
-  bool is_distinct;
-  ArrayList seen_values;
+  bool has_min, has_max, is_distinct;
   int distinct_count;
 } AggState;
 

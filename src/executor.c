@@ -186,10 +186,14 @@ static void exec_create_table_ast(ASTNode* ast) {
 }
 
 static Value copy_string_value(const Value* src) {
-    Value copy = *src;
+    Value copy = {0};
+    if (!src) return copy;
+    copy = *src;
     if (src->type == TYPE_STRING && src->char_val) {
         copy.char_val = malloc(strlen(src->char_val) + 1);
-        strcpy(copy.char_val, src->char_val);
+        if (copy.char_val) {
+            strcpy(copy.char_val, src->char_val);
+        }
     }
     return copy;
 }
@@ -202,8 +206,12 @@ static void exec_insert_row_ast(ASTNode* ast) {
         return;
     }
 
+    int schema_col_count = alist_length(&table->schema.columns);
     int row_count = alist_length(&ins->value_rows);
     if (row_count == 0) return;
+
+    int specified_col_count = alist_length(&ins->columns);
+    bool has_columns = specified_col_count > 0;
 
     int inserted = 0;
     for (int r = 0; r < row_count; r++) {
@@ -218,11 +226,34 @@ static void exec_insert_row_ast(ASTNode* ast) {
 
         alist_init(row, sizeof(Value), free_value);
 
-        for (int i = 0; i < value_count; i++) {
-            ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
-            if (cv) {
+        if (has_columns) {
+            for (int i = 0; i < schema_col_count; i++) {
                 Value* val = (Value*)alist_append(row);
-                *val = copy_string_value(&cv->value);
+                val->type = TYPE_NULL;
+            }
+
+            for (int i = 0; i < value_count; i++) {
+                int* col_idx_ptr = (int*)alist_get(&ins->columns, i);
+                int col_idx = col_idx_ptr ? *col_idx_ptr : i;
+
+                if (col_idx < 0 || col_idx >= schema_col_count) continue;
+
+                ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
+                if (cv) {
+                    Value* val = (Value*)alist_get(row, col_idx);
+                    if (val) {
+                        Value new_val = copy_string_value(&cv->value);
+                        *val = new_val;
+                    }
+                }
+            }
+        } else {
+            for (int i = 0; i < value_count; i++) {
+                ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
+                if (cv) {
+                    Value* val = (Value*)alist_append(row);
+                    *val = copy_string_value(&cv->value);
+                }
             }
         }
         inserted++;
@@ -308,6 +339,7 @@ static uint16_t exec_join_ast(ASTNode* ast) {
             if (new_row) {
                 Row* slot = (Row*)alist_append(&result_table->rows);
                 if (slot) {
+                    memset(slot, 0, sizeof(Row));
                     alist_init(slot, sizeof(Value), free_value);
                     int src_len = alist_length(new_row);
                     for (int k = 0; k < src_len; k++) {
@@ -323,6 +355,7 @@ static uint16_t exec_join_ast(ASTNode* ast) {
 
     Table* t = (Table*)alist_append(&tables);
     if (t) {
+        memset(t, 0, sizeof(Table));
         snprintf(t->name, MAX_TABLE_NAME_LEN, "%s", result_table->name);
         t->table_id = result_table->table_id;
         t->schema.strict = result_table->schema.strict;
@@ -711,8 +744,8 @@ static void process_aggregate_result_rows(QueryResult* result, ArrayList* g_aggr
                 val.char_val = NULL;
                 val.int_val = 0;
                 val.float_val = 0;
-                val.date_val.date_val = 0;
-                val.time_val.time_val = 0;
+                val.date_val = 0;
+                val.time_val = 0;
             }
             result->values[result->row_count * col_count + j] = val;
         }
@@ -772,7 +805,7 @@ static void exec_drop_table_ast(ASTNode* ast) {
     DropTableNode* drop = &ast->drop_table;
     Table* table = get_table_by_id(drop->table_id);
     if (!table) {
-        log_msg(LOG_WARN, "Table not found for drop");
+        log_msg(LOG_WARN, "exec_drop_table_ast: Table not found");
         return;
     }
 
@@ -870,7 +903,20 @@ static void exec_create_index_ast(ASTNode* ast) {
         return;
     }
 
-    index_table_column(table->name, ci->column_name, ci->index_name);
+    const char* column_name = NULL;
+    if (ci->column_idx >= 0 && ci->column_idx < alist_length(&table->schema.columns)) {
+        ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, ci->column_idx);
+        if (col) {
+            column_name = col->name;
+        }
+    }
+
+    if (!column_name) {
+        log_msg(LOG_ERROR, "Column not found for index creation");
+        return;
+    }
+
+    index_table_column(table->name, column_name, ci->index_name);
 }
 
 static void exec_drop_index_ast(ASTNode* ast) {

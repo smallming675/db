@@ -1,6 +1,7 @@
 #include "table.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <strings.h>
 
 #include "arraylist.h"
@@ -18,6 +19,11 @@ static void free_row_contents(void* ptr) {
     Row* row = (Row*)ptr;
     if (!row) return;
     alist_destroy(row);
+}
+
+static void free_column_def_contents(void* ptr) {
+    ColumnDef* col = (ColumnDef*)ptr;
+    (void)col;
 }
 
 Row* create_row(int initial_capacity) {
@@ -41,11 +47,6 @@ void copy_row(Row* dst, const Row* src, int column_count) {
             *dst_val = copy_value(src_val);
         }
     }
-}
-
-static void free_column_def_contents(void* ptr) {
-    ColumnDef* col = (ColumnDef*)ptr;
-    (void)col;
 }
 
 /* Callback function for alist_destroy() to free Table objects */
@@ -99,6 +100,11 @@ Value copy_value(const Value* src) {
         if (dst.char_val) {
             strcpy(dst.char_val, src->char_val);
         }
+    } else if (src->type == TYPE_BLOB && src->blob_val.data != NULL && src->blob_val.length > 0) {
+        dst.blob_val.data = malloc(src->blob_val.length);
+        if (dst.blob_val.data) {
+            memcpy(dst.blob_val.data, src->blob_val.data, src->blob_val.length);
+        }
     }
     return dst;
 }
@@ -109,6 +115,10 @@ void free_value(void* ptr) {
     if (val->type == TYPE_STRING && val->char_val) {
         free(val->char_val);
         val->char_val = NULL;
+    } else if (val->type == TYPE_BLOB && val->blob_val.data) {
+        free(val->blob_val.data);
+        val->blob_val.data = NULL;
+        val->blob_val.length = 0;
     }
     val->type = TYPE_NULL;
 }
@@ -146,6 +156,15 @@ bool value_equals(const Value* a, const Value* b) {
             return a->int_val == b->int_val;
         case TYPE_FLOAT:
             return a->float_val == b->float_val;
+        case TYPE_BOOLEAN:
+            return a->bool_val == b->bool_val;
+        case TYPE_DECIMAL:
+            return a->decimal_val.value == b->decimal_val.value &&
+                   a->decimal_val.precision == b->decimal_val.precision &&
+                   a->decimal_val.scale == b->decimal_val.scale;
+        case TYPE_BLOB:
+            return a->blob_val.length == b->blob_val.length &&
+                   memcmp(a->blob_val.data, b->blob_val.data, a->blob_val.length) == 0;
         case TYPE_STRING:
             return strcmp(a->char_val, b->char_val) == 0;
         default:
@@ -260,6 +279,9 @@ int hash_value(const Value* value, int bucket_count) {
         case TYPE_FLOAT:
             hash = (unsigned long)(value->float_val * 1000.0);
             break;
+        case TYPE_BOOLEAN:
+            hash = (unsigned long)(value->bool_val);
+            break;
         case TYPE_STRING:
             if (value->char_val) {
                 const char* p = value->char_val;
@@ -269,10 +291,10 @@ int hash_value(const Value* value, int bucket_count) {
             }
             break;
         case TYPE_TIME:
-            hash = value->time_val.time_val;
+            hash = value->time_val;
             break;
         case TYPE_DATE:
-            hash = value->date_val.date_val;
+            hash = value->date_val;
             break;
         default:
             hash = 0;

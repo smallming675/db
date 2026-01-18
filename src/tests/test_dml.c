@@ -74,6 +74,40 @@ void test_insert_mixed_types(void) {
     log_msg(LOG_INFO, "INSERT mixed types tests passed");
 }
 
+void test_insert_with_column_names(void) {
+    log_msg(LOG_INFO, "Testing INSERT with explicit column names...");
+
+    reset_database();
+
+    exec("CREATE TABLE test (id INT, name STRING, age INT, city STRING);");
+
+    exec("INSERT INTO test (id, name) VALUES (1, 'Alice');");
+    Table* table = find_table_by_name("test");
+    assert_ptr_not_null(table, "Table should exist");
+    assert_int_eq(1, alist_length(&table->rows), "Table should have 1 row");
+
+    Row* row = (Row*)alist_get(&table->rows, 0);
+    assert_ptr_not_null(row, "Row should exist");
+    assert_int_eq(4, alist_length(row), "Row should have 4 values (NULLs for missing columns)");
+
+    log_msg(LOG_INFO, "Testing INSERT with subset of columns...");
+    exec("INSERT INTO test (name, city) VALUES ('Bob', 'NYC');");
+    assert_int_eq(2, alist_length(&table->rows), "Table should have 2 rows");
+
+    exec("INSERT INTO test (age, id, name) VALUES (25, 3, 'Charlie');");
+    assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
+
+    log_msg(LOG_INFO, "Testing INSERT with all columns in different order...");
+    exec("INSERT INTO test (city, age, name, id) VALUES ('LA', 35, 'Diana', 4);");
+    assert_int_eq(4, alist_length(&table->rows), "Table should have 4 rows");
+
+    log_msg(LOG_INFO, "Testing INSERT with column names and multiple value sets...");
+    exec("INSERT INTO test (id, name) VALUES (5, 'Eve'), (6, 'Frank');");
+    assert_int_eq(6, alist_length(&table->rows), "Table should have 6 rows");
+
+    log_msg(LOG_INFO, "INSERT with explicit column names tests passed");
+}
+
 void test_update_single_row(void) {
     log_msg(LOG_INFO, "Testing UPDATE single row...");
 
@@ -338,4 +372,49 @@ void test_update_same_value(void) {
     assert_int_eq(3, alist_length(&table->rows), "Table should still have 3 rows");
 
     log_msg(LOG_INFO, "UPDATE with same value tests passed");
+}
+
+void test_insert_select_new_types(void) {
+    log_msg(LOG_INFO, "Testing INSERT and SELECT with new data types...");
+
+    reset_database();
+
+    exec("CREATE TABLE new_types (id INT, active BOOLEAN, price DECIMAL, description BLOB);");
+
+    exec("INSERT INTO new_types VALUES (1, TRUE, 99.99, 'Product A');");
+    exec("INSERT INTO new_types VALUES (2, FALSE, 150.50, 'Product B');");
+    exec("INSERT INTO new_types VALUES (3, TRUE, 75.00, NULL);");
+
+    Table* table = find_table_by_name("new_types");
+    assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
+
+    Row* row = (Row*)alist_get(&table->rows, 0);
+    assert_ptr_not_null(row, "First row should exist");
+    assert_int_eq(4, alist_length(row), "Row should have 4 values");
+
+    Value* val = (Value*)alist_get(row, 0);
+    assert_int_eq(TYPE_INT, val->type, "First value should be INT");
+    assert_int_eq(1, val->int_val, "id should be 1");
+
+    val = (Value*)alist_get(row, 1);
+    assert_int_eq(TYPE_BOOLEAN, val->type, "Second value should be BOOLEAN");
+    assert_true(val->bool_val, "active should be TRUE");
+
+    val = (Value*)alist_get(row, 2);
+    assert_true(val->type == TYPE_FLOAT || val->type == TYPE_DECIMAL, "Third value should be numeric");
+
+    val = (Value*)alist_get(row, 3);
+    assert_int_eq(TYPE_STRING, val->type, "Fourth value should be STRING");
+    assert_true(val->char_val && strcmp(val->char_val, "Product A") == 0, "description should be 'Product A'");
+
+    row = (Row*)alist_get(&table->rows, 1);
+    val = (Value*)alist_get(row, 1);
+    assert_int_eq(TYPE_BOOLEAN, val->type, "Second row active should be BOOLEAN");
+    assert_true(!val->bool_val, "active should be FALSE");
+
+    row = (Row*)alist_get(&table->rows, 2);
+    val = (Value*)alist_get(row, 3);
+    assert_int_eq(TYPE_NULL, val->type, "Third row description should be NULL");
+
+    log_msg(LOG_INFO, "INSERT and SELECT with new data types tests passed");
 }

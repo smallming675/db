@@ -8,8 +8,12 @@
 #include "logger.h"
 #include "table.h"
 
-static unsigned int make_time(int hour, int minute, int second) { return ((hour & 0xFF) << 12) | ((minute & 0x3F) << 6) | (second & 0x3F); }
-static unsigned int make_date(int year, int month, int day) { return ((year & 0x3FFFFF) << 9) | ((month & 0xF) << 5) | (day & 0x1F); }
+static unsigned int make_time(int hour, int minute, int second) {
+    return ((hour & 0xFF) << 12) | ((minute & 0x3F) << 6) | (second & 0x3F);
+}
+static unsigned int make_date(int year, int month, int day) {
+    return ((year & 0x3FFFFF) << 9) | ((month & 0xF) << 5) | (day & 0x1F);
+}
 
 #define COLOR_RESET "\x1b[0m"
 #define COLOR_RED "\x1b[31m"
@@ -40,8 +44,10 @@ static int levenshtein_distance(const char* s1, const char* s2) {
         curr[0] = i;
         for (int j = 1; j <= len2; j++) {
             int cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
-            curr[j] = (curr[j - 1] + 1 < prev[j] + 1 ? curr[j - 1] + 1 : prev[j] + 1) < prev[j - 1] + cost ?
-                      (curr[j - 1] + 1 < prev[j] + 1 ? curr[j - 1] + 1 : prev[j] + 1) : prev[j - 1] + cost;
+            curr[j] =
+                (curr[j - 1] + 1 < prev[j] + 1 ? curr[j - 1] + 1 : prev[j] + 1) < prev[j - 1] + cost
+                    ? (curr[j - 1] + 1 < prev[j] + 1 ? curr[j - 1] + 1 : prev[j] + 1)
+                    : prev[j - 1] + cost;
         }
         int* temp = prev;
         prev = curr;
@@ -70,7 +76,8 @@ static void suggest_similar_table(ParseContext* ctx, const char* requested_name)
     }
 
     if (best_match) {
-        snprintf(ctx->error.suggestion, sizeof(ctx->error.suggestion), "Did you mean '%s'?", best_match);
+        snprintf(ctx->error.suggestion, sizeof(ctx->error.suggestion), "Did you mean '%s'?",
+                 best_match);
     }
 }
 
@@ -548,6 +555,8 @@ const char* parse_error_code_str(ParseErrorCode code) {
             return "Unexpected End";
         case PARSE_ERROR_TOO_MANY_COLUMNS:
             return "Too Many Columns";
+        case PARSE_ERROR_TABLE_NOT_FOUND:
+            return "Table Not Found";
         default:
             return "Unknown";
     }
@@ -697,6 +706,12 @@ static DataType parse_data_type(ParseContext* ctx) {
         if (strcasecmp(current_token[-1].value, "STRING") == 0) return TYPE_STRING;
         if (strcasecmp(current_token[-1].value, "TEXT") == 0) return TYPE_STRING;
         if (strcasecmp(current_token[-1].value, "FLOAT") == 0) return TYPE_FLOAT;
+        if (strcasecmp(current_token[-1].value, "DOUBLE") == 0) return TYPE_FLOAT;
+        if (strcasecmp(current_token[-1].value, "BOOLEAN") == 0) return TYPE_BOOLEAN;
+        if (strcasecmp(current_token[-1].value, "BOOL") == 0) return TYPE_BOOLEAN;
+        if (strcasecmp(current_token[-1].value, "DECIMAL") == 0) return TYPE_DECIMAL;
+        if (strcasecmp(current_token[-1].value, "NUMERIC") == 0) return TYPE_DECIMAL;
+        if (strcasecmp(current_token[-1].value, "BLOB") == 0) return TYPE_BLOB;
     } else if (consume(ctx, TOKEN_DATE)) {
         return TYPE_DATE;
     } else if (consume(ctx, TOKEN_TIME)) {
@@ -923,14 +938,26 @@ static Value parse_value(ParseContext* ctx) {
         val.type = TYPE_NULL;
         advance();
         return val;
+    } else if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "TRUE") == 0) {
+        log_msg(LOG_DEBUG, "parse_value: Parsing TRUE value");
+        val.type = TYPE_BOOLEAN;
+        val.bool_val = true;
+        advance();
+        return val;
+    } else if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "FALSE") == 0) {
+        log_msg(LOG_DEBUG, "parse_value: Parsing FALSE value");
+        val.type = TYPE_BOOLEAN;
+        val.bool_val = false;
+        advance();
+        return val;
     } else if (match(TOKEN_DATE)) {
         log_msg(LOG_DEBUG, "parse_value: Parsing date value '%s'", current_token->value);
         val.type = TYPE_DATE;
         int year, month, day;
         if (sscanf(current_token->value, "%d-%d-%d", &year, &month, &day) == 3) {
-            val.date_val.date_val = make_date(year, month, day);
+            val.date_val = make_date(year, month, day);
         } else {
-            val.date_val.date_val = 0;
+            val.date_val = 0;
         }
         advance();
         return val;
@@ -939,9 +966,31 @@ static Value parse_value(ParseContext* ctx) {
         val.type = TYPE_TIME;
         int hour, minute, second;
         if (sscanf(current_token->value, "%d:%d:%d", &hour, &minute, &second) == 3) {
-            val.time_val.time_val = make_time(hour, minute, second);
+            val.time_val = make_time(hour, minute, second);
         } else {
-            val.time_val.time_val = 0;
+            val.time_val = 0;
+        }
+        advance();
+        return val;
+    } else if (match(TOKEN_KEYWORD) && strncasecmp(current_token->value, "X'", 2) == 0) {
+        log_msg(LOG_DEBUG, "parse_value: Parsing BLOB hex value");
+        val.type = TYPE_BLOB;
+        const char* hex_str = current_token->value + 2;
+        size_t hex_len = strlen(hex_str);
+        if (hex_len >= 2 && hex_str[hex_len - 1] == '\'') {
+            hex_len--;
+        }
+        val.blob_val.length = hex_len / 2;
+        val.blob_val.data = malloc(val.blob_val.length);
+        if (val.blob_val.data) {
+            for (size_t i = 0; i < val.blob_val.length; i++) {
+                char high = hex_str[i * 2];
+                char low = hex_str[i * 2 + 1];
+                unsigned int byte;
+                sscanf(&high, "%x", &byte);
+                sscanf(&low, "%x", &byte);
+                ((unsigned char*)val.blob_val.data)[i] = (unsigned char)byte;
+            }
         }
         advance();
         return val;
@@ -1142,17 +1191,17 @@ static Expr* parse_primary(ParseContext* ctx) {
             expr->value.type = TYPE_DATE;
             int year, month, day;
             if (sscanf(current_token->value, "%d-%d-%d", &year, &month, &day) == 3) {
-                expr->value.date_val.date_val = make_date(year, month, day);
+                expr->value.date_val = make_date(year, month, day);
             } else {
-                expr->value.date_val.date_val = 0;
+                expr->value.date_val = 0;
             }
         } else if (match(TOKEN_TIME)) {
             expr->value.type = TYPE_TIME;
             int hour, minute, second;
             if (sscanf(current_token->value, "%d:%d:%d", &hour, &minute, &second) == 3) {
-                expr->value.time_val.time_val = make_time(hour, minute, second);
+                expr->value.time_val = make_time(hour, minute, second);
             } else {
-                expr->value.time_val.time_val = 0;
+                expr->value.time_val = 0;
             }
         } else if (match(TOKEN_STRING)) {
             expr->value.type = TYPE_STRING;
@@ -1459,14 +1508,102 @@ static ASTNode* parse_insert(ParseContext* ctx) {
     Table* table = find_table(table_name);
     node->insert.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_insert: Table name = '%s', table_id = %d", table_name, node->insert.table_id);
+    log_msg(LOG_DEBUG, "parse_insert: Table name = '%s', table_id = %d", table_name,
+            node->insert.table_id);
 
-    if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "VALUES") == 0) {
+    bool has_columns = false;
+    ArrayList column_indices;
+    alist_init(&column_indices, sizeof(int), NULL);
+
+    if (current_token->type == TOKEN_LPAREN) {
+        log_msg(LOG_DEBUG, "parse_insert: Found LPAREN after table name");
+        advance();
+
+        if (current_token->type == TOKEN_IDENTIFIER) {
+            log_msg(LOG_DEBUG, "parse_insert: Token after LPAREN is IDENTIFIER '%s'", current_token->value);
+            int i = 0;
+            while (current_token[i].type == TOKEN_COMMA || current_token[i].type == TOKEN_IDENTIFIER) {
+                log_msg(LOG_DEBUG, "parse_insert: Found identifier at offset %d: '%s'", i, current_token[i].value);
+                i++;
+            }
+            log_msg(LOG_DEBUG, "parse_insert: After scanning, offset=%d, next token type=%d '%s'", i, current_token[i].type, current_token[i].value);
+            if (current_token[i].type == TOKEN_RPAREN) {
+                log_msg(LOG_DEBUG, "parse_insert: Next token is RPAREN - treating as column list");
+                has_columns = true;
+                log_msg(LOG_DEBUG, "parse_insert: Parsing column list");
+
+                while (current_token->type == TOKEN_IDENTIFIER) {
+                    char col_name[MAX_COLUMN_NAME_LEN];
+                    strncpy(col_name, current_token->value, MAX_COLUMN_NAME_LEN - 1);
+                    col_name[MAX_COLUMN_NAME_LEN - 1] = '\0';
+
+                    int col_idx = -1;
+                    if (table) {
+                        for (int k = 0; k < alist_length(&table->schema.columns); k++) {
+                            ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, k);
+                            if (col && strcasecmp(col->name, col_name) == 0) {
+                                col_idx = k;
+                                break;
+                            }
+                        }
+                    }
+                    int* idx_ptr = (int*)alist_append(&column_indices);
+                    *idx_ptr = col_idx;
+
+                    advance();
+
+                    if (!consume(ctx, TOKEN_COMMA)) {
+                        break;
+                    }
+                }
+
+                if (!expect(ctx, TOKEN_RPAREN, "INSERT column list")) {
+                    alist_destroy(&column_indices);
+                    free(node);
+                    return NULL;
+                }
+
+                if (current_token->type != TOKEN_KEYWORD || strcasecmp(current_token->value, "VALUES") != 0) {
+                    parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'VALUES' after column list",
+                                    "VALUES keyword", token_type_name(current_token->type),
+                                    "INSERT syntax: INSERT INTO table_name (col1, col2) VALUES (...)");
+                    alist_destroy(&column_indices);
+                    free(node);
+                    return NULL;
+                }
+                advance();
+            }
+        }
+
+        if (!has_columns) {
+            log_msg(LOG_DEBUG, "parse_insert: Parsing value list");
+
+            while (current_token->type != TOKEN_RPAREN) {
+                ColumnValue* cv = (ColumnValue*)alist_append(&column_indices);
+                if (cv) {
+                    cv->value = parse_value(ctx);
+                    cv->column_name[0] = '\0';
+                }
+                if (!consume(ctx, TOKEN_COMMA)) {
+                    break;
+                }
+            }
+
+            if (!expect(ctx, TOKEN_RPAREN, "INSERT VALUES")) {
+                alist_destroy(&column_indices);
+                free(node);
+                return NULL;
+            }
+        }
+    } else if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "VALUES") == 0) {
         log_msg(LOG_DEBUG, "parse_insert: Found VALUES keyword");
         advance();
-    }
-
-    if (!expect(ctx, TOKEN_LPAREN, "INSERT")) {
+    } else {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected '(' or 'VALUES' after table name",
+                        "LPAREN or VALUES", token_type_name(current_token->type),
+                        "INSERT syntax: INSERT INTO table_name (col1, col2) VALUES (...)\n"
+                        "   or: INSERT INTO table_name VALUES (...)");
+        alist_destroy(&column_indices);
         free(node);
         return NULL;
     }
@@ -1474,37 +1611,59 @@ static ASTNode* parse_insert(ParseContext* ctx) {
     log_msg(LOG_DEBUG, "parse_insert: Starting value parsing");
 
     alist_init(&node->insert.value_rows, sizeof(ArrayList), NULL);
+    alist_init(&node->insert.columns, sizeof(int), NULL);
+    int col_count = alist_length(&column_indices);
+    for (int i = 0; i < col_count; i++) {
+        int* idx = (int*)alist_get(&column_indices, i);
+        int* idx_copy = (int*)alist_append(&node->insert.columns);
+        *idx_copy = *idx;
+    }
+    alist_destroy(&column_indices);
 
-    bool first_value_set = true;
     while (true) {
-        if (first_value_set) {
-            first_value_set = false;
-        } else {
-            if (!expect(ctx, TOKEN_LPAREN, "INSERT VALUES")) {
-                free(node);
-                return NULL;
-            }
+        if (!expect(ctx, TOKEN_LPAREN, "INSERT VALUES")) {
+            free(node);
+            return NULL;
         }
 
         ArrayList* value_row = (ArrayList*)alist_append(&node->insert.value_rows);
         if (!value_row) {
-            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for value row",
-                            "memory", "NULL", NULL);
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
+                            "Memory allocation failed for value row", "memory", "NULL", NULL);
             free(node);
             return NULL;
         }
         alist_init(value_row, sizeof(ColumnValue), free_column_value);
 
+        int value_idx = 0;
         while (current_token->type != TOKEN_RPAREN) {
             ColumnValue* cv = (ColumnValue*)alist_append(value_row);
             if (!cv) {
-                parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for values",
-                                "memory", "NULL", NULL);
+                parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
+                                "Memory allocation failed for values", "memory", "NULL", NULL);
                 free(node);
                 return NULL;
             }
+
+            if (has_columns && value_idx < col_count) {
+                int* col_idx = (int*)alist_get(&node->insert.columns, value_idx);
+                if (col_idx && *col_idx >= 0 && table) {
+                    ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, *col_idx);
+                    if (col) {
+                        strncpy(cv->column_name, col->name, MAX_COLUMN_NAME_LEN - 1);
+                        cv->column_name[MAX_COLUMN_NAME_LEN - 1] = '\0';
+                    } else {
+                        cv->column_name[0] = '\0';
+                    }
+                } else {
+                    cv->column_name[0] = '\0';
+                }
+            } else {
+                cv->column_name[0] = '\0';
+            }
+
             cv->value = parse_value(ctx);
-            cv->column_name[0] = '\0';
+            value_idx++;
 
             if (!consume(ctx, TOKEN_COMMA)) {
                 log_msg(LOG_DEBUG, "parse_insert: No more commas in value list");
@@ -1529,7 +1688,6 @@ static ASTNode* parse_insert(ParseContext* ctx) {
 }
 
 static ASTNode* parse_select(ParseContext* ctx) {
-
     ASTNode* node = malloc(sizeof(ASTNode));
     if (!node) {
         parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for SELECT node",
@@ -1669,9 +1827,11 @@ static ASTNode* parse_select(ParseContext* ctx) {
     Table* table = find_table(table_name);
     if (!table) {
         suggest_similar_table(ctx, table_name);
-        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Table not found",
-                        "table name", table_name,
-                        ctx->error.suggestion[0] ? ctx->error.suggestion : "No tables found with that name, try creating a table with CREATE TABLE.");
+        parse_error_set(
+            ctx, PARSE_ERROR_TABLE_NOT_FOUND, "Table not found", "table name", table_name,
+            ctx->error.suggestion[0]
+                ? ctx->error.suggestion
+                : "No tables found with that name, try creating a table with CREATE TABLE.");
         free(node);
         return NULL;
     }
@@ -1680,7 +1840,8 @@ static ASTNode* parse_select(ParseContext* ctx) {
     node->select.join_table_id = -1;
     node->select.join_condition = NULL;
 
-    log_msg(LOG_DEBUG, "parse_select: Table name = '%s', table_id = %d", table_name, node->select.table_id);
+    log_msg(LOG_DEBUG, "parse_select: Table name = '%s', table_id = %d", table_name,
+            node->select.table_id);
 
     if (match(TOKEN_JOIN)) {
         log_msg(LOG_DEBUG, "parse_select: Found JOIN keyword");
@@ -1697,7 +1858,8 @@ static ASTNode* parse_select(ParseContext* ctx) {
         if (!match(TOKEN_IDENTIFIER)) {
             parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected table name after JOIN",
                             "table name (IDENTIFIER)",
-                            current_token->type == TOKEN_EOF ? "end of input" : token_type_name(current_token->type),
+                            current_token->type == TOKEN_EOF ? "end of input"
+                                                             : token_type_name(current_token->type),
                             "Use: SELECT ... FROM table1 JOIN table2 ON condition\n"
                             "     SELECT ... FROM table1 INNER JOIN table2 ON condition\n"
                             "     SELECT ... FROM table1 LEFT JOIN table2 ON condition");
@@ -1711,7 +1873,8 @@ static ASTNode* parse_select(ParseContext* ctx) {
             suggest_similar_table(ctx, join_table_name);
             parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Table not found in JOIN",
                             "table name", join_table_name,
-                            ctx->error.suggestion[0] ? ctx->error.suggestion : "No tables found with that name");
+                            ctx->error.suggestion[0] ? ctx->error.suggestion
+                                                     : "No tables found with that name");
             free(node);
             return NULL;
         }
@@ -1723,9 +1886,10 @@ static ASTNode* parse_select(ParseContext* ctx) {
         advance();
 
         if (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "ON") != 0) {
-            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'ON' keyword after JOIN table",
-                            "ON keyword",
-                            current_token->type == TOKEN_EOF ? "end of input" : token_type_name(current_token->type),
+            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                            "Expected 'ON' keyword after JOIN table", "ON keyword",
+                            current_token->type == TOKEN_EOF ? "end of input"
+                                                             : token_type_name(current_token->type),
                             "Use: SELECT ... FROM table1 JOIN table2 ON condition");
             free(node);
             return NULL;
@@ -1838,7 +2002,8 @@ static ASTNode* parse_drop_table(ParseContext* ctx) {
     Table* table = find_table(table_name);
     node->drop_table.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_drop_table: Table name = '%s', table_id = %d", table_name, node->drop_table.table_id);
+    log_msg(LOG_DEBUG, "parse_drop_table: Table name = '%s', table_id = %d", table_name,
+            node->drop_table.table_id);
     advance();
 
     return node;
@@ -1866,7 +2031,8 @@ static ASTNode* parse_update(ParseContext* ctx) {
     Table* table = find_table(table_name);
     node->update.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_update: Table name = '%s', table_id = %d", table_name, node->update.table_id);
+    log_msg(LOG_DEBUG, "parse_update: Table name = '%s', table_id = %d", table_name,
+            node->update.table_id);
 
     if (!expect(ctx, TOKEN_KEYWORD, "UPDATE") || strcasecmp(current_token[-1].value, "SET") != 0) {
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
@@ -1973,7 +2139,8 @@ static ASTNode* parse_delete(ParseContext* ctx) {
     Table* table = find_table(table_name);
     node->delete.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_delete: Table name = '%s', table_id = %d", table_name, node->delete.table_id);
+    log_msg(LOG_DEBUG, "parse_delete: Table name = '%s', table_id = %d", table_name,
+            node->delete.table_id);
 
     if (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "WHERE") == 0) {
         log_msg(LOG_DEBUG, "parse_delete: Found WHERE clause");
@@ -2048,7 +2215,8 @@ static ASTNode* parse_create_index(ParseContext* ctx) {
     Table* table = find_table(table_name);
     node->create_index.table_id = table ? table->table_id : -1;
 
-    log_msg(LOG_DEBUG, "parse_create_index: Table name = '%s', table_id = %d", table_name, node->create_index.table_id);
+    log_msg(LOG_DEBUG, "parse_create_index: Table name = '%s', table_id = %d", table_name,
+            node->create_index.table_id);
     advance();
 
     if (!match(TOKEN_LPAREN)) {
@@ -2070,14 +2238,15 @@ static ASTNode* parse_create_index(ParseContext* ctx) {
         return NULL;
     }
 
-    char* col_dest = node->create_index.column_name;
+    char column_name[MAX_COLUMN_NAME_LEN];
+    char* col_dest = column_name;
     const char* col_src = current_token->value;
     size_t col_copy_len = strlen(col_src);
     if (col_copy_len >= MAX_COLUMN_NAME_LEN) col_copy_len = MAX_COLUMN_NAME_LEN - 1;
     memcpy(col_dest, col_src, col_copy_len);
     col_dest[col_copy_len] = '\0';
 
-    log_msg(LOG_DEBUG, "parse_create_index: Column name = '%s'", node->create_index.column_name);
+    log_msg(LOG_DEBUG, "parse_create_index: Column name = '%s'", column_name);
     advance();
 
     if (!match(TOKEN_RPAREN)) {
@@ -2087,6 +2256,18 @@ static ASTNode* parse_create_index(ParseContext* ctx) {
         free(node);
         return NULL;
     }
+
+    int col_idx = -1;
+    if (table) {
+        for (int i = 0; i < alist_length(&table->schema.columns); i++) {
+            ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, i);
+            if (col && strcmp(col->name, column_name) == 0) {
+                col_idx = i;
+                break;
+            }
+        }
+    }
+    node->create_index.column_idx = col_idx;
 
     log_msg(LOG_DEBUG, "parse_create_index: Successfully parsed CREATE INDEX");
     return node;

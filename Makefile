@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -Wpedantic -std=c11 -g -O2 -Iinclude
+CFLAGS = -Wall -Wextra -Werror -Wpedantic -std=c11 -g -O2 
 SRCDIR = src
 INCDIR = include
 BUILDDIR = build

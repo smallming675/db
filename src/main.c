@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
 
     char input[8192];
     printf("Simple Database System\n");
-    printf("Type 'HELP' for usage, 'EXIT' to quit\n\n");
+    printf("Type '.help;' for usage, '.exit;' to quit\n\n");
 
     log_msg(LOG_INFO, "Database system started");
 
@@ -78,11 +78,11 @@ int main(int argc, char* argv[]) {
 
         if (strlen(input) == 0) continue;
         log_msg(LOG_DEBUG, "Processing command: '%s'", input);
-        if (strcmp(input, ".EXIT") == 0 || strcmp(input, ".exit") == 0) {
+        if (strcmp(input, ".EXIT;") == 0 || strcmp(input, ".exit;") == 0) {
             log_msg(LOG_INFO, "Exit command received");
             break;
         }
-        if (strcmp(input, ".HELP") == 0 || strcmp(input, ".help") == 0) {
+        if (strcmp(input, ".HELP;") == 0 || strcmp(input, ".help;") == 0) {
             print_usage();
             continue;
         }

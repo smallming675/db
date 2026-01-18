@@ -121,13 +121,8 @@ void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count,
         const char* str = val->type == TYPE_NULL ? "NULL" : repr(val);
         int str_width = get_str_width(str);
         int padding = col_widths[j].width - str_width;
-
-        if (col_widths[j].is_numeric) {
-            int left_pad = padding / 2;
-            printf(" %*s%s%*s ", left_pad, "", str, padding - left_pad, "");
-        } else {
-            printf(" %s%*s ", str, padding, "");
-        }
+        int left_pad = padding / 2;
+        printf(" %*s%s%*s ", left_pad, "", str, padding - left_pad, "");
         printf("\u2502");
     }
     printf("\n");

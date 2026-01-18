@@ -11,10 +11,13 @@ void test_create_table(void);
 void test_drop_table(void);
 void test_create_table_with_foreign_key(void);
 void test_create_table_multiple_columns(void);
+void test_create_table_new_types(void);
 
 void test_insert_single_row(void);
 void test_insert_multiple_values(void);
 void test_insert_mixed_types(void);
+void test_insert_with_column_names(void);
+void test_insert_select_new_types(void);
 void test_update_single_row(void);
 void test_update_multiple_rows(void);
 void test_update_all_rows(void);
@@ -106,11 +109,14 @@ int main(void) {
     test_drop_table();
     test_create_table_with_foreign_key();
     test_create_table_multiple_columns();
+    test_create_table_new_types();
 
     log_msg(LOG_INFO, "\n=== DML Tests ===");
     test_insert_single_row();
     test_insert_multiple_values();
     test_insert_mixed_types();
+    test_insert_with_column_names();
+    test_insert_select_new_types();
     test_update_single_row();
     test_update_multiple_rows();
     test_update_all_rows();
