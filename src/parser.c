@@ -116,6 +116,12 @@ static void free_column_value(void* ptr) {
 static void free_expr_contents(Expr* expr) {
     if (!expr) return;
     switch (expr->type) {
+        case EXPR_VALUE:
+            if (expr->value.type == TYPE_STRING && expr->value.char_val) {
+                free(expr->value.char_val);
+                expr->value.char_val = NULL;
+            }
+            break;
         case EXPR_BINARY_OP:
             if (expr->binary.left) free_expr_contents(expr->binary.left);
             if (expr->binary.right) free_expr_contents(expr->binary.right);
@@ -1174,21 +1180,28 @@ static Expr* parse_primary(ParseContext* ctx) {
     } else if (match(TOKEN_LPAREN)) {
         log_msg(LOG_DEBUG, "parse_primary: Parsing parenthesized expression");
         advance();
-        expr = parse_or_expr(ctx);
-        if (!expr) {
+        Expr* inner = parse_or_expr(ctx);
+        if (!inner) {
             parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
                             "Failed to parse expression inside parentheses", "valid expression",
                             current_token->type == TOKEN_EOF ? "end of input"
                                                              : token_type_name(current_token->type),
                             get_context_suggestion("expression", TOKEN_ERROR));
-            return NULL;
-        }
-        if (!expect(ctx, TOKEN_RPAREN, "expression")) {
+            free_expr_contents(expr);
             free(expr);
             return NULL;
         }
+        if (!expect(ctx, TOKEN_RPAREN, "expression")) {
+            free_expr_contents(inner);
+            free(inner);
+            free_expr_contents(expr);
+            free(expr);
+            return NULL;
+        }
+        return inner;
     } else {
         log_msg(LOG_WARN, "parse_primary: Unknown token type %d", current_token->type);
+        free_expr_contents(expr);
         free(expr);
 
         char expected[256];
@@ -1236,6 +1249,9 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
         expr->subquery.subquery = subquery_expr->subquery.subquery;
         free(subquery_expr);
         if (!expect(ctx, TOKEN_RPAREN, "EXISTS")) {
+            if (expr->subquery.subquery) {
+                free_ast(expr->subquery.subquery);
+            }
             free(expr);
             return NULL;
         }
@@ -1328,7 +1344,9 @@ static Expr* parse_comparison_expr(ParseContext* ctx) {
         expr->binary.left = left;
         expr->binary.right = parse_unary_expr(ctx);
         if (!expr->binary.right) {
+            free_expr_contents(expr);
             free(expr);
+            free_expr_contents(left);
             free(left);
             return NULL;
         }
@@ -1353,7 +1371,9 @@ static Expr* parse_and_expr(ParseContext* ctx) {
         expr->binary.left = left;
         expr->binary.right = parse_comparison_expr(ctx);
         if (!expr->binary.right) {
+            free_expr_contents(expr);
             free(expr);
+            free_expr_contents(left);
             free(left);
             return NULL;
         }
@@ -1378,7 +1398,9 @@ static Expr* parse_or_expr(ParseContext* ctx) {
         expr->binary.left = left;
         expr->binary.right = parse_and_expr(ctx);
         if (!expr->binary.right) {
+            free_expr_contents(expr);
             free(expr);
+            free_expr_contents(left);
             free(left);
             return NULL;
         }
@@ -1442,37 +1464,62 @@ static ASTNode* parse_insert(ParseContext* ctx) {
 
     log_msg(LOG_DEBUG, "parse_insert: Starting value parsing");
 
-    alist_init(&node->insert.values, sizeof(ColumnValue), free_column_value);
+    alist_init(&node->insert.value_rows, sizeof(ArrayList), NULL);
 
-    while (!match(TOKEN_RPAREN)) {
-        ColumnValue* cv = (ColumnValue*)alist_append(&node->insert.values);
-        if (!cv) {
-            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for values",
+    bool first_value_set = true;
+    while (true) {
+        if (first_value_set) {
+            first_value_set = false;
+        } else {
+            if (!expect(ctx, TOKEN_LPAREN, "INSERT VALUES")) {
+                free(node);
+                return NULL;
+            }
+        }
+
+        ArrayList* value_row = (ArrayList*)alist_append(&node->insert.value_rows);
+        if (!value_row) {
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for value row",
                             "memory", "NULL", NULL);
             free(node);
             return NULL;
         }
-        cv->value = parse_value(ctx);
-        cv->column_name[0] = '\0';
+        alist_init(value_row, sizeof(ColumnValue), free_column_value);
+
+        while (current_token->type != TOKEN_RPAREN) {
+            ColumnValue* cv = (ColumnValue*)alist_append(value_row);
+            if (!cv) {
+                parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for values",
+                                "memory", "NULL", NULL);
+                free(node);
+                return NULL;
+            }
+            cv->value = parse_value(ctx);
+            cv->column_name[0] = '\0';
+
+            if (!consume(ctx, TOKEN_COMMA)) {
+                log_msg(LOG_DEBUG, "parse_insert: No more commas in value list");
+                break;
+            }
+        }
+
+        if (!expect(ctx, TOKEN_RPAREN, "INSERT VALUES")) {
+            free(node);
+            return NULL;
+        }
 
         if (!consume(ctx, TOKEN_COMMA)) {
-            log_msg(LOG_DEBUG, "parse_insert: No more commas");
+            log_msg(LOG_DEBUG, "parse_insert: No more value rows");
             break;
         }
     }
 
-    if (!expect(ctx, TOKEN_RPAREN, "INSERT")) {
-        free(node);
-        return NULL;
-    }
-
-    log_msg(LOG_DEBUG, "parse_insert: Successfully parsed INSERT with %d values",
-            alist_length(&node->insert.values));
+    log_msg(LOG_DEBUG, "parse_insert: Successfully parsed INSERT with %d value rows",
+            alist_length(&node->insert.value_rows));
     return node;
 }
 
 static ASTNode* parse_select(ParseContext* ctx) {
-    log_msg(LOG_DEBUG, "parse_select: Starting SELECT parsing");
 
     ASTNode* node = malloc(sizeof(ASTNode));
     if (!node) {
@@ -1486,6 +1533,14 @@ static ASTNode* parse_select(ParseContext* ctx) {
     node->next = NULL;
 
     alist_init(&node->select.expressions, sizeof(Expr*), NULL);
+
+    node->select.distinct = false;
+
+    if (match(TOKEN_DISTINCT)) {
+        log_msg(LOG_DEBUG, "parse_select: Found DISTINCT keyword");
+        node->select.distinct = true;
+        advance();
+    }
 
     if (match(TOKEN_OPERATOR) && strcmp(current_token->value, "*") == 0) {
         log_msg(LOG_DEBUG, "parse_select: Found * (all columns)");
@@ -2190,16 +2245,30 @@ void free_ast(ASTNode* ast) {
     free_ast(ast->next);
 
     switch (ast->type) {
-        case AST_INSERT_ROW:
-            alist_destroy(&ast->insert.values);
+        case AST_INSERT_ROW: {
+            int row_count = alist_length(&ast->insert.value_rows);
+            for (int i = 0; i < row_count; i++) {
+                ArrayList* row = (ArrayList*)alist_get(&ast->insert.value_rows, i);
+                if (row) alist_destroy(row);
+            }
+            alist_destroy(&ast->insert.value_rows);
             break;
+        }
         case AST_CREATE_TABLE:
             alist_destroy(&ast->create_table.columns);
             break;
         case AST_UPDATE_ROW:
             alist_destroy(&ast->update.values);
+            if (ast->update.where_clause) {
+                free_expr_contents(ast->update.where_clause);
+                free(ast->update.where_clause);
+            }
             break;
         case AST_DELETE_ROW:
+            if (ast->delete.where_clause) {
+                free_expr_contents(ast->delete.where_clause);
+                free(ast->delete.where_clause);
+            }
             break;
         case AST_SELECT: {
             int expr_count = alist_length(&ast->select.expressions);
@@ -2221,6 +2290,14 @@ void free_ast(ASTNode* ast) {
             }
             alist_destroy(&ast->select.order_by);
             alist_destroy(&ast->select.order_by_desc);
+            if (ast->select.where_clause) {
+                free_expr_contents(ast->select.where_clause);
+                free(ast->select.where_clause);
+            }
+            if (ast->select.join_condition) {
+                free_expr_contents(ast->select.join_condition);
+                free(ast->select.join_condition);
+            }
             break;
         }
         default:

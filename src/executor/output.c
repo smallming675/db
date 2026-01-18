@@ -4,6 +4,7 @@
 
 #include "arraylist.h"
 #include "db.h"
+#include "logger.h"
 #include "values.h"
 
 typedef struct {
@@ -53,33 +54,33 @@ static void calculate_column_widths(QueryResult* result, ColumnWidth* col_widths
 }
 
 void print_table_separator(ColumnWidth* col_widths, int col_count) {
-    printf("├");
+    printf("+");
     for (int j = 0; j < col_count; j++) {
         for (int i = 0; i < col_widths[j].width + 2; i++) {
-            printf("─");
+            printf("-");
         }
         if (j < col_count - 1) {
-            printf("┼");
+            printf("+");
         }
     }
-    printf("┤\n");
+    printf("+\n");
 }
 
 void print_table_header(QueryResult* result, ColumnWidth* col_widths, int col_count) {
-    printf("│");
+    printf("|");
     for (int j = 0; j < col_count; j++) {
         const char* name = result->column_names[j];
         int name_width = get_str_width(name);
         int padding = col_widths[j].width - name_width;
         int left_pad = padding / 2;
         printf(" %*s%s%*s ", left_pad, "", name, padding - left_pad, "");
-        printf("│");
+        printf("|");
     }
     printf("\n");
 }
 
 void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count, int row_idx) {
-    printf("│");
+    printf("|");
     for (int j = 0; j < col_count; j++) {
         const Value* val = &result->values[row_idx * col_count + j];
         const char* str = val->type == TYPE_NULL ? "NULL" : repr(val);
@@ -92,7 +93,7 @@ void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count,
         } else {
             printf(" %s%*s ", str, padding, "");
         }
-        printf("│");
+        printf("|");
     }
     printf("\n");
 }
@@ -139,16 +140,16 @@ void print_pretty_result(QueryResult* result) {
     calculate_column_widths(result, col_widths, col_count);
 
     printf("\n");
-    printf("┌");
+    printf("+");
     for (int j = 0; j < col_count; j++) {
         for (int i = 0; i < col_widths[j].width + 2; i++) {
-            printf("─");
+            printf("-");
         }
         if (j < col_count - 1) {
-            printf("┬");
+            printf("+");
         }
     }
-    printf("┐\n");
+    printf("+\n");
 
     print_table_header(result, col_widths, col_count);
     print_table_separator(col_widths, col_count);
@@ -157,16 +158,16 @@ void print_pretty_result(QueryResult* result) {
         print_row_data(result, col_widths, col_count, i);
     }
 
-    printf("└");
+    printf("+");
     for (int j = 0; j < col_count; j++) {
         for (int i = 0; i < col_widths[j].width + 2; i++) {
-            printf("─");
+            printf("-");
         }
         if (j < col_count - 1) {
-            printf("┴");
+            printf("+");
         }
     }
-    printf("┘\n");
+    printf("+\n");
 
     free(col_widths);
 }

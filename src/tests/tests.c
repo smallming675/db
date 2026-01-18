@@ -1,0 +1,121 @@
+#include <stdio.h>
+#include <string.h>
+
+#include "arraylist.h"
+#include "db.h"
+#include "logger.h"
+#include "table.h"
+#include "test_util.h"
+
+void test_create_table(void);
+void test_drop_table(void);
+void test_create_table_with_foreign_key(void);
+void test_create_table_multiple_columns(void);
+
+void test_insert_single_row(void);
+void test_insert_multiple_values(void);
+void test_insert_mixed_types(void);
+void test_update_single_row(void);
+void test_update_multiple_rows(void);
+void test_update_all_rows(void);
+void test_delete_single_row(void);
+void test_delete_multiple_rows(void);
+void test_delete_all_rows(void);
+void test_insert_with_comments(void);
+void test_multiple_statements(void);
+
+void test_select_all(void);
+void test_select_columns(void);
+void test_select_with_where(void);
+void test_select_with_and_or(void);
+void test_select_with_like(void);
+void test_select_with_order_by(void);
+void test_select_with_limit(void);
+void test_select_with_order_by_limit(void);
+void test_select_distinct(void);
+void test_select_is_null(void);
+void test_select_case_sensitivity(void);
+
+void test_count_aggregate(void);
+void test_sum_aggregate(void);
+void test_avg_aggregate(void);
+void test_min_aggregate(void);
+void test_max_aggregate(void);
+void test_multiple_aggregates(void);
+void test_aggregate_with_where(void);
+void test_aggregate_edge_cases(void);
+void test_count_all_vs_column(void);
+
+void test_string_functions(void);
+void test_numeric_functions(void);
+void test_concat_function(void);
+void test_substring_function(void);
+void test_length_function(void);
+void test_mod_function(void);
+void test_power_function(void);
+void test_mid_function(void);
+void test_scalar_in_expressions(void);
+
+void test_inner_join(void);
+void test_left_join(void);
+void test_join_multiple_matches(void);
+void test_join_no_matches(void);
+void test_join_empty_table(void);
+void test_join_syntax_variations(void);
+void test_self_join(void);
+void test_three_table_join(void);
+
+void test_subquery_with_comparison(void);
+void test_correlated_subquery(void);
+void test_subquery_in_insert(void);
+void test_subquery_with_aggregates(void);
+void test_exists_subquery(void);
+void test_nested_subquery(void);
+void test_subquery_with_join(void);
+void test_scalar_subquery(void);
+
+int main(void) {
+    set_log_level(LOG_INFO);
+    log_msg(LOG_INFO, "========================================");
+    log_msg(LOG_INFO, "Running Tests...");
+    log_msg(LOG_INFO, "========================================");
+
+    log_msg(LOG_INFO, "\n=== DDL Tests ===");
+    test_create_table();
+    test_drop_table();
+    test_create_table_with_foreign_key();
+    test_create_table_multiple_columns();
+
+    log_msg(LOG_INFO, "\n=== DML Tests ===");
+    test_insert_single_row();
+    test_insert_multiple_values();
+    test_insert_mixed_types();
+    test_update_single_row();
+    test_update_multiple_rows();
+    test_update_all_rows();
+    test_delete_single_row();
+    test_delete_multiple_rows();
+    test_delete_all_rows();
+    test_insert_with_comments();
+    test_multiple_statements();
+
+    log_msg(LOG_INFO, "\n=== SELECT Tests ===");
+    test_select_all();
+    test_select_columns();
+    test_select_with_where();
+    test_select_with_and_or();
+    test_select_with_like();
+    test_select_with_order_by();
+    test_select_with_limit();
+    test_select_with_order_by_limit();
+    test_select_distinct();
+    test_select_is_null();
+    test_select_case_sensitivity();
+
+    log_msg(LOG_INFO, "All SELECT tests passed successfully!");
+    log_msg(LOG_INFO, "========================================");
+    log_msg(LOG_INFO, "All tests passed successfully!");
+    log_msg(LOG_INFO, "========================================");
+
+    return 0;
+}

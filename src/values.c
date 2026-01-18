@@ -233,6 +233,10 @@ static bool eval_like_expression(const Value* left, const Value* right) {
         }
     }
 
+    while (match && (*p == '%' || *p == '*')) {
+        p++;
+    }
+
     match = match && (*p == '\0' && *text == '\0');
     return match;
 }

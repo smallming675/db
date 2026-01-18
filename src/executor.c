@@ -16,6 +16,10 @@ static QueryResult* g_last_result = NULL;
 static ArrayList g_aggregate_results;
 static bool g_in_aggregate_context = false;
 
+QueryResult* get_last_query_result(void) { return g_last_result; }
+
+void set_last_query_result(QueryResult* result) { g_last_result = result; }
+
 static void free_row_contents(void* ptr);
 static bool has_aggregate_expr(ASTNode* ast);
 static void exec_create_table_ast(ASTNode* ast);
@@ -203,23 +207,33 @@ static void exec_insert_row_ast(ASTNode* ast) {
         return;
     }
 
-    int value_count = alist_length(&ins->values);
-    if (value_count == 0) return;
+    int row_count = alist_length(&ins->value_rows);
+    if (row_count == 0) return;
 
-    Row* row = (Row*)alist_append(&table->rows);
-    if (!row) return;
+    int inserted = 0;
+    for (int r = 0; r < row_count; r++) {
+        ArrayList* value_row = (ArrayList*)alist_get(&ins->value_rows, r);
+        if (!value_row) continue;
 
-    row->value_count = value_count;
-    row->values = malloc(value_count * sizeof(Value));
+        int value_count = alist_length(value_row);
+        if (value_count == 0) continue;
 
-    for (int i = 0; i < value_count; i++) {
-        ColumnValue* cv = (ColumnValue*)alist_get(&ins->values, i);
-        if (cv) {
-            row->values[i] = copy_string_value(&cv->value);
+        Row* row = (Row*)alist_append(&table->rows);
+        if (!row) continue;
+
+        row->value_count = value_count;
+        row->values = malloc(value_count * sizeof(Value));
+
+        for (int i = 0; i < value_count; i++) {
+            ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
+            if (cv) {
+                row->values[i] = copy_string_value(&cv->value);
+            }
         }
+        inserted++;
     }
 
-    log_msg(LOG_INFO, "Inserted 1 row into table '%s'", table->name);
+    log_msg(LOG_INFO, "Inserted %d row%s into table '%s'", inserted, inserted == 1 ? "" : "s", table->name);
 }
 
 static void copy_columns_to_result(Table* result, Table* source, int col_count);

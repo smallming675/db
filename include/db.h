@@ -268,7 +268,7 @@ typedef struct {
 
 typedef struct {
   uint8_t table_id;
-  ArrayList values;
+  ArrayList value_rows;
 } InsertNode;
 
 typedef struct {
@@ -283,6 +283,7 @@ typedef struct {
   int join_table_id;
   char join_table_name[MAX_TABLE_NAME_LEN];
   Expr *join_condition;
+  bool distinct;
 } SelectNode;
 
 typedef struct {

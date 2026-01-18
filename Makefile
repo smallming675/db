@@ -7,8 +7,10 @@ BINDIR = bin
 
 SRC_SOURCES = $(wildcard $(SRCDIR)/*.c)
 EXECUTOR_SOURCES = $(wildcard $(SRCDIR)/executor/*.c)
+TEST_SOURCES = $(wildcard $(SRCDIR)/tests/*.c)
 OBJECTS = $(SRC_SOURCES:$(SRCDIR)/%.c=$(BUILDDIR)/%.o)
 OBJECTS += $(EXECUTOR_SOURCES:$(SRCDIR)/executor/%.c=$(BUILDDIR)/executor/%.o)
+TEST_OBJECTS = $(TEST_SOURCES:$(SRCDIR)/tests/%.c=$(BUILDDIR)/tests/%.o)
 TARGET = $(BINDIR)/db
 TEST_TARGET = $(BINDIR)/test_db
 
@@ -28,8 +30,11 @@ $(BUILDDIR)/executor/%.o: $(SRCDIR)/executor/%.c | $(BUILDDIR)/executor
 $(BUILDDIR)/%.o: $(INCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
 
-$(BUILDDIR)/main.o: $(SRCDIR)/main.c | $(BUILDDIR)
+$(BUILDDIR)/tests/%.o: $(SRCDIR)/tests/%.c | $(BUILDDIR)/tests
 	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
+
+$(BUILDDIR)/tests:
+	mkdir -p $(BUILDDIR)/tests
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -40,8 +45,8 @@ $(BUILDDIR)/executor:
 $(BINDIR):
 	mkdir -p $(BINDIR)
 
-$(TEST_TARGET): $(filter-out $(BUILDDIR)/main.o $(BUILDDIR)/tests.o,$(OBJECTS)) $(BUILDDIR)/tests.o | $(BINDIR)
-	$(CC) $(filter-out $(BUILDDIR)/main.o $(BUILDDIR)/tests.o,$(OBJECTS)) $(BUILDDIR)/tests.o -o $@ -lm
+$(TEST_TARGET): $(filter-out $(BUILDDIR)/main.o $(BUILDDIR)/tests.o,$(OBJECTS)) $(TEST_OBJECTS) | $(BINDIR)
+	$(CC) $(filter-out $(BUILDDIR)/main.o $(BUILDDIR)/tests.o,$(OBJECTS)) $(TEST_OBJECTS) -o $@ -lm
 
 debug: CFLAGS += -DDEBUG -g3
 debug: $(TARGET)

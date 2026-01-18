@@ -21,85 +21,118 @@ bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
             bool right_val = eval_expression(expr->binary.right, row, schema);
 
             switch (expr->binary.op) {
-                case OP_AND: return left_val && right_val;
-                case OP_OR:  return left_val || right_val;
+                case OP_AND:
+                    return left_val && right_val;
+                case OP_OR:
+                    return left_val || right_val;
                 case OP_EQUALS:
                 case OP_NOT_EQUALS:
                 case OP_LESS:
                 case OP_LESS_EQUAL:
                 case OP_GREATER:
-                case OP_GREATER_EQUAL: {
+                case OP_GREATER_EQUAL:
+                case OP_LIKE: {
                     Expr* left = expr->binary.left;
                     Expr* right = expr->binary.right;
                     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
-                        return eval_comparison(get_column_value(row, schema, left->column_name), right->value, expr->binary.op);
+                        return eval_comparison(get_column_value(row, schema, left->column_name),
+                                               right->value, expr->binary.op);
                     }
                     if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
-                        return eval_comparison(left->value, get_column_value(row, schema, right->column_name), expr->binary.op);
+                        return eval_comparison(left->value,
+                                               get_column_value(row, schema, right->column_name),
+                                               expr->binary.op);
                     }
                     if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
-                        return eval_comparison(get_column_value(row, schema, left->column_name), get_column_value(row, schema, right->column_name), expr->binary.op);
+                        return eval_comparison(get_column_value(row, schema, left->column_name),
+                                               get_column_value(row, schema, right->column_name),
+                                               expr->binary.op);
                     }
                     return false;
                 }
-                default: return false;
+                default:
+                    return false;
             }
         }
         case EXPR_UNARY_OP: {
             bool operand_val = eval_expression(expr->unary.operand, row, schema);
             return expr->unary.op == OP_NOT ? !operand_val : false;
         }
-        default: return false;
+        default:
+            return false;
     }
 }
 
-bool eval_expression_for_join(const Expr* expr, const Row* row, 
-                              const TableDef* left_schema, 
-                              const TableDef* right_schema,
-                              int left_col_count) {
+bool eval_cmp_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
+                        const TableDef* right_schema, int left_col_count) {
+    Expr* left = expr->binary.left;
+    Expr* right = expr->binary.right;
+    if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
+        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema,
+                                                          left_col_count, left->column_name),
+                               right->value, expr->binary.op);
+    }
+    if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
+        return eval_comparison(left->value,
+                               get_column_value_from_join(row, left_schema, right_schema,
+                                                          left_col_count, right->column_name),
+                               expr->binary.op);
+    }
+    if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
+        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema,
+                                                          left_col_count, left->column_name),
+                               get_column_value_from_join(row, left_schema, right_schema,
+                                                          left_col_count, right->column_name),
+                               expr->binary.op);
+    }
+    return false;
+}
+bool eval_binary_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
+                           const TableDef* right_schema, int left_col_count) {
+    bool left_val =
+        eval_expression_for_join(expr->binary.left, row, left_schema, right_schema, left_col_count);
+    bool right_val = eval_expression_for_join(expr->binary.right, row, left_schema, right_schema,
+                                              left_col_count);
+
+    switch (expr->binary.op) {
+        case OP_AND:
+            return left_val && right_val;
+        case OP_OR:
+            return left_val || right_val;
+        case OP_EQUALS:
+        case OP_NOT_EQUALS:
+        case OP_LESS:
+        case OP_LESS_EQUAL:
+        case OP_GREATER:
+        case OP_GREATER_EQUAL:
+            return eval_cmp_operation(expr, row, left_schema, right_schema, left_col_count);
+        default:
+            return false;
+    }
+}
+
+bool eval_expression_for_join(const Expr* expr, const Row* row, const TableDef* left_schema,
+                              const TableDef* right_schema, int left_col_count) {
     if (!expr) return true;
 
     switch (expr->type) {
         case EXPR_COLUMN: {
-            Value val = get_column_value_from_join(row, left_schema, right_schema, left_col_count, expr->column_name);
+            Value val = get_column_value_from_join(row, left_schema, right_schema, left_col_count,
+                                                   expr->column_name);
             return !is_null(&val);
         }
         case EXPR_VALUE:
             return !is_null(&expr->value);
-        case EXPR_BINARY_OP: {
-            bool left_val = eval_expression_for_join(expr->binary.left, row, left_schema, right_schema, left_col_count);
-            bool right_val = eval_expression_for_join(expr->binary.right, row, left_schema, right_schema, left_col_count);
+        case EXPR_BINARY_OP:
+            return eval_binary_operation(expr, row, left_schema, right_schema, left_col_count);
 
-            switch (expr->binary.op) {
-                case OP_AND: return left_val && right_val;
-                case OP_OR:  return left_val || right_val;
-                case OP_EQUALS:
-                case OP_NOT_EQUALS:
-                case OP_LESS:
-                case OP_LESS_EQUAL:
-                case OP_GREATER:
-                case OP_GREATER_EQUAL: {
-                    Expr* left = expr->binary.left;
-                    Expr* right = expr->binary.right;
-                    if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
-                        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema, left_col_count, left->column_name), right->value, expr->binary.op);
-                    }
-                    if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
-                        return eval_comparison(left->value, get_column_value_from_join(row, left_schema, right_schema, left_col_count, right->column_name), expr->binary.op);
-                    }
-                    if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
-                        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema, left_col_count, left->column_name), get_column_value_from_join(row, left_schema, right_schema, left_col_count, right->column_name), expr->binary.op);
-                    }
-                    return false;
-                }
-                default: return false;
-            }
-        }
         case EXPR_UNARY_OP: {
-            bool operand_val = eval_expression_for_join(expr->unary.operand, row, left_schema, right_schema, left_col_count);
+            bool operand_val = eval_expression_for_join(expr->unary.operand, row, left_schema,
+                                                        right_schema, left_col_count);
             return expr->unary.op == OP_NOT ? !operand_val : false;
         }
-        default: return false;
+        default:
+            return false;
     }
 }
 
@@ -112,15 +145,9 @@ static Value copy_string_value(const Value* src) {
     return copy;
 }
 
-static Value eval_arithmetic_op(OperatorType op, Value left, Value right);
-
-static Value eval_comparison_op(OperatorType op, Value left, Value right);
-
-Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
-
 static Value eval_arithmetic_op(OperatorType op, Value left, Value right) {
     Value result = {0};
-    
+
     switch (op) {
         case OP_ADD:
             if (left.type == TYPE_INT && right.type == TYPE_INT) {
@@ -175,7 +202,8 @@ static Value eval_arithmetic_op(OperatorType op, Value left, Value right) {
                 result.int_val = left.int_val % right.int_val;
             }
             break;
-        default: break;
+        default:
+            break;
     }
     return result;
 }
@@ -187,6 +215,40 @@ static Value eval_comparison_op(OperatorType op, Value left, Value right) {
     return result;
 }
 
+static Value eval_subquery(const Expr* expr) {
+    Value result = {0};
+    result.type = TYPE_NULL;
+
+    if (!expr || expr->type != EXPR_SUBQUERY || !expr->subquery.subquery) {
+        log_msg(LOG_DEBUG, "eval_subquery: early return, expr=%p", expr);
+        return result;
+    }
+
+    log_msg(LOG_DEBUG, "eval_subquery: executing subquery");
+
+    ASTNode* subquery_ast = expr->subquery.subquery;
+
+    QueryResult* saved_result = get_last_query_result();
+    set_last_query_result(NULL);
+
+    exec_ast(subquery_ast);
+
+    QueryResult* last_result = get_last_query_result();
+    if (last_result && last_result->row_count > 0) {
+        int col_count = last_result->col_count;
+        if (col_count > 0) {
+            result = copy_string_value(&last_result->values[0]);
+        }
+    }
+
+    free_query_result(last_result);
+    set_last_query_result(saved_result);
+
+    return result;
+}
+
+Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
+
 Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
     Value result = {0};
     result.type = TYPE_NULL;
@@ -194,14 +256,16 @@ Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema)
     if (!expr) return result;
 
     switch (expr->type) {
-        case EXPR_COLUMN:
-            return get_column_value(row, schema, expr->column_name);
+        case EXPR_COLUMN: {
+            Value col_val = get_column_value(row, schema, expr->column_name);
+            return copy_string_value(&col_val);
+        }
         case EXPR_VALUE:
             return copy_string_value(&expr->value);
         case EXPR_BINARY_OP: {
             Value left = eval_select_expression(expr->binary.left, row, schema);
             Value right = eval_select_expression(expr->binary.right, row, schema);
-            
+
             switch (expr->binary.op) {
                 case OP_ADD:
                 case OP_SUBTRACT:
@@ -219,7 +283,8 @@ Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema)
                 case OP_AND:
                 case OP_OR:
                     return eval_comparison_op(expr->binary.op, left, right);
-                default: break;
+                default:
+                    break;
             }
             break;
         }
@@ -234,13 +299,13 @@ Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema)
             break;
         }
         case EXPR_AGGREGATE_FUNC:
-            log_msg(LOG_ERROR, "eval_select_expression: Cannot evaluate aggregate in non-aggregate context");
+            log_msg(LOG_ERROR,
+                    "eval_select_expression: Cannot evaluate aggregate in non-aggregate context");
             break;
         case EXPR_SCALAR_FUNC:
             return eval_scalar_function(expr, row, schema);
         case EXPR_SUBQUERY:
-            log_msg(LOG_ERROR, "eval_select_expression: Subquery evaluation NOT IMPLEMENTED");
-            break;
+            return eval_subquery(expr);
         default:
             log_msg(LOG_WARN, "eval_select_expression: Unknown expression type %d", expr->type);
     }

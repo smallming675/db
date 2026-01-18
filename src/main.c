@@ -1,9 +1,12 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "arraylist.h"
 #include "db.h"
 #include "logger.h"
-#include "arraylist.h"
 #include "table.h"
-#include <unistd.h>
-#include <stdio.h>
 
 static void print_usage(void) {
     printf("Usage: db [OPTIONS]\n");
@@ -36,20 +39,20 @@ int main(int argc, char* argv[]) {
     char input[8192];
     printf("Simple Database System\n");
     printf("Type 'HELP' for usage, 'EXIT' to quit\n\n");
-    
+
     log_msg(LOG_INFO, "Database system started");
-    
+
     while (1) {
         printf("db> ");
         fflush(stdout);
-        
+
         input[0] = '\0';
         char line[1024];
         bool has_content = false;
-        
+
         while (fgets(line, sizeof(line), stdin)) {
             line[strcspn(line, "\r\n")] = '\0';
-            
+
             if (!has_content) {
                 strcpy(input, line);
                 has_content = true;
@@ -59,48 +62,32 @@ int main(int argc, char* argv[]) {
                     strcat(input, line);
                 }
             }
-            
+
             if (strchr(line, ';')) {
                 break;
             }
-            
-            if (has_content && strlen(line) > 0) {
-                printf("  > ");
-                fflush(stdout);
-            } else if (!has_content) {
-                printf("db> ");
-                fflush(stdout);
-            }
+
+            fflush(stdout);
         }
-        
+
         if (!has_content) {
             log_msg(LOG_INFO, "Input stream ended, exiting");
             break;
         }
-        
         input[strcspn(input, "\r\n")] = '\0';
-        
-        if (strlen(input) == 0) continue;
 
+        if (strlen(input) == 0) continue;
         log_msg(LOG_DEBUG, "Processing command: '%s'", input);
-        
-        /* Remove trailing semicolon if present */
-        size_t input_len = strlen(input);
-        if (input_len > 0 && input[input_len - 1] == ';') {
-            input[input_len - 1] = '\0';
-        }
-        
-        if (strcmp(input, "EXIT") == 0 || strcmp(input, "exit") == 0) {
+        if (strcmp(input, ".EXIT") == 0 || strcmp(input, ".exit") == 0) {
             log_msg(LOG_INFO, "Exit command received");
             break;
         }
-        
-        if (strcmp(input, "HELP") == 0 || strcmp(input, "help") == 0) {
+        if (strcmp(input, ".HELP") == 0 || strcmp(input, ".help") == 0) {
             print_usage();
             continue;
         }
-        
-        if (strcmp(input, "LIST") == 0 || strcmp(input, "list") == 0) {
+
+        if (strcmp(input, ".LIST") == 0 || strcmp(input, ".list") == 0) {
             int table_count = alist_length(&tables);
             extern ArrayList tables;
             log_msg(LOG_INFO, "Listing %d tables", table_count);
@@ -110,44 +97,102 @@ int main(int argc, char* argv[]) {
                 if (table) {
                     int col_count = alist_length(&table->schema.columns);
                     int row_count = alist_length(&table->rows);
-                    printf("  '%s' (%d columns, %d rows)\n",
-                           table->name, col_count, row_count);
-                    log_msg(LOG_DEBUG, "Table '%s': %d columns, %d rows",
-                           table->name, col_count, row_count);
+                    printf("  '%s' (%d columns, %d rows)\n", table->name, col_count, row_count);
+                    log_msg(LOG_DEBUG, "Table '%s': %d columns, %d rows", table->name, col_count,
+                            row_count);
                 }
             }
             continue;
         }
-        
-        log_msg(LOG_DEBUG, "Tokenizing input");
-        Token* tokens = tokenize(input);
-        if (!tokens) {
-            log_msg(LOG_ERROR, "Tokenization failed for input: '%s'", input);
+
+        if (input[0] == '.') {
+            log_msg(LOG_ERROR, "Unknown command: %s", input);
             continue;
         }
-        log_msg(LOG_DEBUG, "Tokenization completed successfully");
-        
-        log_msg(LOG_DEBUG, "Parsing tokens");
-        ASTNode* ast = parse_ex(input, tokens);
-        if (!ast) {
-            log_msg(LOG_ERROR, "Parse failed for input: '%s'", input);
-            ParseContext* ctx = parse_get_context();
-            if (ctx->error_occurred) {
-                parse_error_report(ctx);
+
+        size_t input_len = strlen(input);
+        char* input_copy = malloc(input_len + 1);
+        if (!input_copy) {
+            log_msg(LOG_ERROR, "Memory allocation failed");
+            continue;
+        }
+        strcpy(input_copy, input);
+        char* stmt = input_copy;
+
+        while (true) {
+            char* semicolon_pos = strchr(stmt, ';');
+            if (semicolon_pos) {
+                *semicolon_pos = '\0';
             }
-            free_tokens(tokens);
-            continue;
+
+            char* trimmed = stmt;
+            while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+            char* end = trimmed + strlen(trimmed) - 1;
+            while (end > trimmed && (*end == ' ' || *end == '\t')) end--;
+            *(end + 1) = '\0';
+
+            if (*trimmed != '\0') {
+                if (strcmp(trimmed, ".LIST") == 0) {
+                    int table_count = alist_length(&tables);
+                    extern ArrayList tables;
+                    log_msg(LOG_INFO, "Listing %d tables", table_count);
+                    printf("Tables:\n");
+                    for (int i = 0; i < table_count; i++) {
+                        Table* table = (Table*)alist_get(&tables, i);
+                        if (table) {
+                            int col_count = alist_length(&table->schema.columns);
+                            int row_count = alist_length(&table->rows);
+                            printf("  '%s' (%d columns, %d rows)\n", table->name, col_count,
+                                   row_count);
+                            log_msg(LOG_DEBUG, "Table '%s': %d columns, %d rows", table->name,
+                                    col_count, row_count);
+                        }
+                    }
+                } else {
+                    log_msg(LOG_DEBUG, "Processing statement: '%s'", trimmed);
+
+                    log_msg(LOG_DEBUG, "Tokenizing input");
+                    Token* tokens = tokenize(trimmed);
+                    if (!tokens) {
+                        log_msg(LOG_ERROR, "Tokenization failed for input: '%s'", trimmed);
+                        free(input_copy);
+                        continue;
+                    }
+                    log_msg(LOG_DEBUG, "Tokenization completed successfully");
+
+                    log_msg(LOG_DEBUG, "Parsing tokens");
+                    ASTNode* ast = parse_ex(trimmed, tokens);
+                    if (!ast) {
+                        log_msg(LOG_ERROR, "Parse failed for input: '%s'", trimmed);
+                        ParseContext* ctx = parse_get_context();
+                        if (ctx->error_occurred) {
+                            parse_error_report(ctx);
+                        }
+                        free_tokens(tokens);
+                    } else {
+                        log_msg(LOG_DEBUG, "Parsing completed successfully");
+
+                        log_msg(LOG_DEBUG, "Executing AST");
+                        exec_ast(ast);
+                        log_msg(LOG_DEBUG, "AST execution completed");
+
+                        free_ast(ast);
+                        free_tokens(tokens);
+                    }
+                }
+            }
+
+            if (semicolon_pos) {
+                stmt = semicolon_pos + 1;
+            } else {
+                break;
+            }
         }
-        log_msg(LOG_DEBUG, "Parsing completed successfully");
 
-        log_msg(LOG_DEBUG, "Executing AST");
-        exec_ast(ast);
-        log_msg(LOG_DEBUG, "AST execution completed");
-
-        free_tokens(tokens);
-        free_ast(ast);
+        free(input_copy);
+        continue;
     }
-    
+
     log_msg(LOG_INFO, "Database system shutting down");
     alist_destroy(&tables);
     printf("\nGoodbye!\n");

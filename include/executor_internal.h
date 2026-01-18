@@ -17,5 +17,7 @@ Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* sch
 void print_column_headers(SelectNode* select, Table* table, bool is_select_star, int col_count);
 void print_result_row(const Value* values, int col_count);
 void print_pretty_result(QueryResult* result);
+QueryResult* get_last_query_result(void);
+void set_last_query_result(QueryResult* result);
 
 #endif
