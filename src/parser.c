@@ -21,6 +21,59 @@ static unsigned int make_date(int year, int month, int day) { return ((year & 0x
 #define COLOR_BOLD "\x1b[1m"
 #define COLOR_DIM "\x1b[2m"
 
+static int levenshtein_distance(const char* s1, const char* s2) {
+    int len1 = strlen(s1);
+    int len2 = strlen(s2);
+    int* prev = malloc((len2 + 1) * sizeof(int));
+    int* curr = malloc((len2 + 1) * sizeof(int));
+    if (!prev || !curr) {
+        if (prev) free(prev);
+        if (curr) free(curr);
+        return len1 + len2;
+    }
+
+    for (int j = 0; j <= len2; j++) {
+        prev[j] = j;
+    }
+
+    for (int i = 1; i <= len1; i++) {
+        curr[0] = i;
+        for (int j = 1; j <= len2; j++) {
+            int cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
+            curr[j] = (curr[j - 1] + 1 < prev[j] + 1 ? curr[j - 1] + 1 : prev[j] + 1) < prev[j - 1] + cost ?
+                      (curr[j - 1] + 1 < prev[j] + 1 ? curr[j - 1] + 1 : prev[j] + 1) : prev[j - 1] + cost;
+        }
+        int* temp = prev;
+        prev = curr;
+        curr = temp;
+    }
+
+    int dist = prev[len2];
+    free(prev);
+    free(curr);
+    return dist;
+}
+
+static void suggest_similar_table(ParseContext* ctx, const char* requested_name) {
+    const char* best_match = NULL;
+    int best_dist = 3;
+
+    for (int i = 0; i < alist_length(&tables); i++) {
+        Table* table = (Table*)alist_get(&tables, i);
+        if (table) {
+            int dist = levenshtein_distance(requested_name, table->name);
+            if (dist < best_dist) {
+                best_dist = dist;
+                best_match = table->name;
+            }
+        }
+    }
+
+    if (best_match) {
+        snprintf(ctx->error.suggestion, sizeof(ctx->error.suggestion), "Did you mean '%s'?", best_match);
+    }
+}
+
 static Token* current_token;
 static int token_index;
 static int column_position;
@@ -474,23 +527,23 @@ void parse_error_report(ParseContext* ctx) {
 const char* parse_error_code_str(ParseErrorCode code) {
     switch (code) {
         case PARSE_ERROR_NONE:
-            return "NONE";
+            return "None";
         case PARSE_ERROR_UNEXPECTED_TOKEN:
-            return "UNEXPECTED_TOKEN";
+            return "Unexpected Token";
         case PARSE_ERROR_MISSING_TOKEN:
-            return "MISSING_TOKEN";
+            return "Missing Token";
         case PARSE_ERROR_INVALID_SYNTAX:
-            return "INVALID_SYNTAX";
+            return "Invalid Syntax";
         case PARSE_ERROR_UNTERMINATED_STRING:
-            return "UNTERMINATED_STRING";
+            return "Unterminated String";
         case PARSE_ERROR_INVALID_NUMBER:
-            return "INVALID_NUMBER";
+            return "Invalid Number";
         case PARSE_ERROR_UNEXPECTED_END:
-            return "UNEXPECTED_END";
+            return "Unexpected End";
         case PARSE_ERROR_TOO_MANY_COLUMNS:
-            return "TOO_MANY_COLUMNS";
+            return "Too Many Columns";
         default:
-            return "UNKNOWN";
+            return "Unknown";
     }
 }
 
@@ -1550,7 +1603,15 @@ static ASTNode* parse_select(ParseContext* ctx) {
 
     const char* table_name = current_token[-1].value;
     Table* table = find_table(table_name);
-    node->select.table_id = table ? table->table_id : -1;
+    if (!table) {
+        suggest_similar_table(ctx, table_name);
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Table not found",
+                        "table name", table_name,
+                        ctx->error.suggestion[0] ? ctx->error.suggestion : "No tables found with that name, try creating a table with CREATE TABLE.");
+        free(node);
+        return NULL;
+    }
+    node->select.table_id = table->table_id;
     node->select.join_type = JOIN_NONE;
     node->select.join_table_id = -1;
     node->select.join_condition = NULL;
@@ -1582,7 +1643,15 @@ static ASTNode* parse_select(ParseContext* ctx) {
 
         const char* join_table_name = current_token->value;
         Table* join_table = find_table(join_table_name);
-        node->select.join_table_id = join_table ? join_table->table_id : -1;
+        if (!join_table) {
+            suggest_similar_table(ctx, join_table_name);
+            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Table not found in JOIN",
+                            "table name", join_table_name,
+                            ctx->error.suggestion[0] ? ctx->error.suggestion : "No tables found with that name");
+            free(node);
+            return NULL;
+        }
+        node->select.join_table_id = join_table->table_id;
         size_t len = strlen(join_table_name);
         if (len >= MAX_TABLE_NAME_LEN) len = MAX_TABLE_NAME_LEN - 1;
         memcpy(node->select.join_table_name, join_table_name, len);

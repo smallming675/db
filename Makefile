@@ -6,7 +6,9 @@ BUILDDIR = build
 BINDIR = bin
 
 SRC_SOURCES = $(wildcard $(SRCDIR)/*.c)
+EXECUTOR_SOURCES = $(wildcard $(SRCDIR)/executor/*.c)
 OBJECTS = $(SRC_SOURCES:$(SRCDIR)/%.c=$(BUILDDIR)/%.o)
+OBJECTS += $(EXECUTOR_SOURCES:$(SRCDIR)/executor/%.c=$(BUILDDIR)/executor/%.o)
 TARGET = $(BINDIR)/db
 TEST_TARGET = $(BINDIR)/test_db
 
@@ -20,6 +22,9 @@ $(TARGET): $(filter-out $(BUILDDIR)/tests.o,$(OBJECTS)) | $(BINDIR)
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
 
+$(BUILDDIR)/executor/%.o: $(SRCDIR)/executor/%.c | $(BUILDDIR)/executor
+	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
+
 $(BUILDDIR)/%.o: $(INCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
 
@@ -28,6 +33,9 @@ $(BUILDDIR)/main.o: $(SRCDIR)/main.c | $(BUILDDIR)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
+
+$(BUILDDIR)/executor:
+	mkdir -p $(BUILDDIR)/executor
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
