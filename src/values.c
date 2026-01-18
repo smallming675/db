@@ -61,7 +61,7 @@ static Value convert_value_impl(const Value* val, DataType target_type, bool* su
             switch (val->type) {
                 case TYPE_INT:
                     result.char_val = malloc(32);
-                    snprintf(result.char_val, 32, "%d", val->int_val);
+                    snprintf(result.char_val, 32, "%lld", (long long)val->int_val);
                     break;
                 case TYPE_FLOAT:
                     result.char_val = malloc(64);
@@ -116,7 +116,7 @@ const char* repr(const Value* val) {
 
     switch (val->type) {
         case TYPE_INT:
-            snprintf(buffer, MAX_STRING_LEN, "%d", val->int_val);
+            snprintf(buffer, MAX_STRING_LEN, "%lld", (long long)val->int_val);
             break;
         case TYPE_FLOAT:
             snprintf(buffer, MAX_STRING_LEN, "%.2f", val->float_val);

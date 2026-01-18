@@ -11,8 +11,11 @@ static Value get_column_value_by_index(const Row* row, const TableDef* schema, i
     Value val = {0};
     val.type = TYPE_NULL;
 
-    if (col_idx >= 0 && col_idx < row->value_count) {
-        val = row->values[col_idx];
+    if (col_idx >= 0 && col_idx < alist_length(row)) {
+        Value* row_val = (Value*)alist_get(row, col_idx);
+        if (row_val) {
+            val = *row_val;
+        }
     }
     return val;
 }

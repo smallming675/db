@@ -21,7 +21,7 @@ void test_insert_single_row(void) {
 
     Row* row = (Row*)alist_get(&table->rows, 0);
     assert_ptr_not_null(row, "Row should exist");
-    assert_int_eq(3, row->value_count, "Row should have 3 values");
+    assert_int_eq(3, alist_length(row), "Row should have 3 values");
 
     log_msg(LOG_INFO, "INSERT single row tests passed");
 }

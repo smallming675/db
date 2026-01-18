@@ -46,14 +46,9 @@ static void exec_drop_index_ast(ASTNode* ast);
 static Value copy_string_value(const Value* src);
 
 static void free_row_contents(void* ptr) {
-    Row* row = (Row*)ptr;
+    ArrayList* row = (ArrayList*)ptr;
     if (!row) return;
-    for (int i = 0; i < row->value_count; i++) {
-        if (row->values[i].type == TYPE_STRING && row->values[i].char_val) {
-            free(row->values[i].char_val);
-        }
-    }
-    free(row->values);
+    alist_destroy(row);
 }
 
 static bool has_aggregate_expr(ASTNode* ast) {
@@ -221,13 +216,13 @@ static void exec_insert_row_ast(ASTNode* ast) {
         Row* row = (Row*)alist_append(&table->rows);
         if (!row) continue;
 
-        row->value_count = value_count;
-        row->values = malloc(value_count * sizeof(Value));
+        alist_init(row, sizeof(Value), free_value);
 
         for (int i = 0; i < value_count; i++) {
             ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
             if (cv) {
-                row->values[i] = copy_string_value(&cv->value);
+                Value* val = (Value*)alist_append(row);
+                *val = copy_string_value(&cv->value);
             }
         }
         inserted++;
@@ -294,7 +289,15 @@ static uint16_t exec_join_ast(ASTNode* ast) {
                 Row* new_row = create_joined_row(left_row, right_row, left_cols, right_cols);
                 if (new_row) {
                     Row* slot = (Row*)alist_append(&result_table->rows);
-                    if (slot) *slot = *new_row;
+                    if (slot) {
+                        alist_init(slot, sizeof(Value), free_value);
+                        int src_len = alist_length(new_row);
+                        for (int k = 0; k < src_len; k++) {
+                            Value* src_val = (Value*)alist_get(new_row, k);
+                            Value* dst_val = (Value*)alist_append(slot);
+                            *dst_val = copy_string_value(src_val);
+                        }
+                    }
                     free(new_row);
                 }
             }
@@ -304,14 +307,45 @@ static uint16_t exec_join_ast(ASTNode* ast) {
             Row* new_row = create_left_join_null_row(left_row, right_cols);
             if (new_row) {
                 Row* slot = (Row*)alist_append(&result_table->rows);
-                if (slot) *slot = *new_row;
+                if (slot) {
+                    alist_init(slot, sizeof(Value), free_value);
+                    int src_len = alist_length(new_row);
+                    for (int k = 0; k < src_len; k++) {
+                        Value* src_val = (Value*)alist_get(new_row, k);
+                        Value* dst_val = (Value*)alist_append(slot);
+                        *dst_val = copy_string_value(src_val);
+                    }
+                }
                 free(new_row);
             }
         }
     }
 
     Table* t = (Table*)alist_append(&tables);
-    if (t) *t = *result_table;
+    if (t) {
+        snprintf(t->name, MAX_TABLE_NAME_LEN, "%s", result_table->name);
+        t->table_id = result_table->table_id;
+        t->schema.strict = result_table->schema.strict;
+        alist_init(&t->rows, sizeof(Row), free_row_contents);
+        alist_init(&t->schema.columns, sizeof(ColumnDef), NULL);
+        copy_columns_to_result(t, result_table, alist_length(&result_table->schema.columns));
+
+        int row_count = alist_length(&result_table->rows);
+        for (int i = 0; i < row_count; i++) {
+            Row* src_row = (Row*)alist_get(&result_table->rows, i);
+            if (!src_row) continue;
+            Row* dst_row = (Row*)alist_append(&t->rows);
+            if (dst_row) {
+                alist_init(dst_row, sizeof(Value), free_value);
+                int val_count = alist_length(src_row);
+                for (int j = 0; j < val_count; j++) {
+                    Value* src_val = (Value*)alist_get(src_row, j);
+                    Value* dst_val = (Value*)alist_append(dst_row);
+                    *dst_val = copy_string_value(src_val);
+                }
+            }
+        }
+    }
 
     log_msg(LOG_INFO, "Created join table '%s' with %d rows", result_table->name,
             alist_length(&result_table->rows));
@@ -330,28 +364,44 @@ static void copy_columns_to_result(Table* result, Table* source, int col_count) 
     }
 }
 
-static Row* create_joined_row(Row* left, Row* right, int left_cols, int right_cols) {
+static Row* create_joined_row(ArrayList* left, ArrayList* right, int left_cols, int right_cols) {
     (void)left_cols;
     (void)right_cols;
     Row* row = malloc(sizeof(Row));
     if (!row) return NULL;
 
-    row->value_count = left->value_count + right->value_count;
-    row->values = malloc(row->value_count * sizeof(Value));
-    memcpy(row->values, left->values, left->value_count * sizeof(Value));
-    memcpy(row->values + left->value_count, right->values, right->value_count * sizeof(Value));
+    alist_init(row, sizeof(Value), free_value);
+
+    int left_count = alist_length(left);
+    for (int i = 0; i < left_count; i++) {
+        Value* val = (Value*)alist_append(row);
+        *val = *(Value*)alist_get(left, i);
+    }
+
+    int right_count = alist_length(right);
+    for (int i = 0; i < right_count; i++) {
+        Value* val = (Value*)alist_append(row);
+        *val = *(Value*)alist_get(right, i);
+    }
+
     return row;
 }
 
-static Row* create_left_join_null_row(Row* left, int right_cols) {
+static Row* create_left_join_null_row(ArrayList* left, int right_cols) {
     Row* row = malloc(sizeof(Row));
     if (!row) return NULL;
 
-    row->value_count = left->value_count + right_cols;
-    row->values = malloc(row->value_count * sizeof(Value));
-    memcpy(row->values, left->values, left->value_count * sizeof(Value));
+    alist_init(row, sizeof(Value), free_value);
+
+    int left_count = alist_length(left);
+    for (int i = 0; i < left_count; i++) {
+        Value* val = (Value*)alist_append(row);
+        *val = *(Value*)alist_get(left, i);
+    }
+
     for (int k = 0; k < right_cols; k++) {
-        row->values[left->value_count + k].type = TYPE_NULL;
+        Value* val = (Value*)alist_append(row);
+        val->type = TYPE_NULL;
     }
     return row;
 }
@@ -645,7 +695,7 @@ static void process_aggregate_result_rows(QueryResult* result, ArrayList* g_aggr
     int capacity = 16;
 
     for (int i = 0; i < 1 && i < agg_count && result->row_count < limit; i++) {
-        if (result->row_count * col_count >= capacity) {
+        if ((result->row_count + 1) * col_count > capacity) {
             capacity *= 2;
             result->values = realloc(result->values, capacity * sizeof(Value));
             result->rows = realloc(result->rows, capacity * sizeof(int));
@@ -679,7 +729,7 @@ static void process_regular_result_rows(QueryResult* result, Table* table, Selec
 
     for (int i = 0; i < row_count && result->row_count < limit; i++) {
         Row* row = (Row*)alist_get(&table->rows, i);
-        if (!row || row->value_count == 0) continue;
+        if (!row || alist_length(row) == 0) continue;
 
         if (select->where_clause) {
             if (!eval_expression(select->where_clause, row, &table->schema)) {
@@ -687,7 +737,7 @@ static void process_regular_result_rows(QueryResult* result, Table* table, Selec
             }
         }
 
-        if (result->row_count * col_count >= capacity) {
+        if ((result->row_count + 1) * col_count > capacity) {
             capacity *= 2;
             result->values = realloc(result->values, capacity * sizeof(Value));
             result->rows = realloc(result->rows, capacity * sizeof(int));
@@ -696,7 +746,8 @@ static void process_regular_result_rows(QueryResult* result, Table* table, Selec
         for (int j = 0; j < col_count; j++) {
             Value val;
             if (is_select_star) {
-                val = copy_string_value(&row->values[j]);
+                Value* row_val = (Value*)alist_get(row, j);
+                val = copy_string_value(row_val);
             } else {
                 Expr** expr = (Expr**)alist_get(&select->expressions, j);
                 val = eval_select_expression(expr[0], row, &table->schema);
@@ -754,13 +805,15 @@ static void exec_update_row_ast(ASTNode* ast) {
             for (int j = 0; j < alist_length(&update->values); j++) {
                 ColumnValue* cv = (ColumnValue*)alist_get(&update->values, j);
                 if (cv && cv->column_name[0]) {
-                    for (int k = 0; k < row->value_count; k++) {
+                    int row_len = alist_length(row);
+                    for (int k = 0; k < row_len; k++) {
                         ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, k);
                         if (col && strcmp(col->name, cv->column_name) == 0) {
-                            if (row->values[k].type == TYPE_STRING && row->values[k].char_val) {
-                                free(row->values[k].char_val);
+                            Value* row_val = (Value*)alist_get(row, k);
+                            if (row_val->type == TYPE_STRING && row_val->char_val) {
+                                free(row_val->char_val);
                             }
-                            row->values[k] = copy_string_value(&cv->value);
+                            *row_val = copy_string_value(&cv->value);
                             break;
                         }
                     }
@@ -792,11 +845,12 @@ static void exec_delete_row_ast(ASTNode* ast) {
         } else {
             Row* kept = (Row*)alist_append(&kept_rows);
             if (kept) {
-                kept->value_capacity = row->value_count > 0 ? row->value_count : 4;
-                kept->values = malloc(kept->value_capacity * sizeof(Value));
-                kept->value_count = 0;
-                if (kept->values) {
-                    copy_row(kept, row, 0);
+                alist_init(kept, sizeof(Value), free_value);
+                int src_len = alist_length(row);
+                for (int k = 0; k < src_len; k++) {
+                    Value* src_val = (Value*)alist_get(row, k);
+                    Value* dst_val = (Value*)alist_append(kept);
+                    *dst_val = copy_string_value(src_val);
                 }
             }
         }

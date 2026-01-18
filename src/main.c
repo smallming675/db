@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (show_logs) {
-        set_log_level(LOG_INFO);
+        set_log_level(LOG_DEBUG);
     } else {
         set_log_level(LOG_ERROR + 1);
     }

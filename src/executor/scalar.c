@@ -172,7 +172,7 @@ static Value eval_math_func_abs(const Value* arg) {
     Value result = {0};
     if (arg->type == TYPE_INT) {
         result.type = TYPE_INT;
-        result.int_val = abs(arg->int_val);
+        result.int_val = llabs(arg->int_val);
     } else if (arg->type == TYPE_FLOAT) {
         result.type = TYPE_FLOAT;
         result.float_val = fabs(arg->float_val);

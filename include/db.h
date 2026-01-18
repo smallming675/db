@@ -138,7 +138,7 @@ typedef struct {
 typedef struct {
   DataType type;
   union {
-    int int_val;
+    long long int_val;
     double float_val;
     char *char_val;
     TimeValue time_val;
@@ -328,11 +328,7 @@ typedef struct ASTNode {
   struct ASTNode *next;
 } ASTNode;
 
-typedef struct Row {
-  Value *values;
-  int value_count;
-  int value_capacity;
-} Row;
+typedef ArrayList Row;
 
 typedef struct {
   char name[MAX_TABLE_NAME_LEN];

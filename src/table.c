@@ -17,59 +17,30 @@ static void free_index(void* ptr);
 static void free_row_contents(void* ptr) {
     Row* row = (Row*)ptr;
     if (!row) return;
-
-    for (int i = 0; i < row->value_count; i++) {
-        if (row->values[i].type == TYPE_STRING && row->values[i].char_val) {
-            free(row->values[i].char_val);
-        }
-    }
-
-    free(row->values);
-    row->values = NULL;
-    row->value_count = 0;
-    row->value_capacity = 0;
+    alist_destroy(row);
 }
 
 Row* create_row(int initial_capacity) {
+    (void)initial_capacity;
     Row* row = malloc(sizeof(Row));
     if (!row) return NULL;
-
-    row->value_capacity = initial_capacity > 0 ? initial_capacity : 4;
-    row->values = malloc(row->value_capacity * sizeof(Value));
-    row->value_count = 0;
-
-    if (!row->values) {
-        free(row);
-        return NULL;
-    }
-
+    alist_init(row, sizeof(Value), free_value);
     return row;
 }
 
-void free_row(Row* row) {
-    if (!row) return;
+void copy_row(Row* dst, const Row* src, int column_count) {
+    if (!dst || !src) return;
 
-    /* Free string values */
-    for (int i = 0; i < row->value_count; i++) {
-        if (row->values[i].type == TYPE_STRING && row->values[i].char_val) {
-            free(row->values[i].char_val);
+    int src_count = alist_length(src);
+    int count = column_count > 0 && column_count < src_count ? column_count : src_count;
+
+    for (int i = 0; i < count; i++) {
+        Value* src_val = (Value*)alist_get(src, i);
+        Value* dst_val = (Value*)alist_append(dst);
+        if (src_val && dst_val) {
+            *dst_val = copy_value(src_val);
         }
     }
-
-    free(row->values);
-    free(row);
-}
-
-int resize_row(Row* row, int new_capacity) {
-    if (new_capacity <= 0) new_capacity = 4;
-
-    Value* new_values = realloc(row->values, new_capacity * sizeof(Value));
-    if (!new_values) return 0;
-
-    row->values = new_values;
-    row->value_capacity = new_capacity;
-
-    return 1;
 }
 
 static void free_column_def_contents(void* ptr) {
@@ -121,12 +92,6 @@ void free_table(Table* table) {
     }
 }
 
-int resize_table(Table* table, int new_capacity) {
-    (void)table;
-    (void)new_capacity;
-    return 1;
-}
-
 Value copy_value(const Value* src) {
     Value dst = *src;
     if (src->type == TYPE_STRING && src->char_val != NULL) {
@@ -146,27 +111,6 @@ void free_value(void* ptr) {
         val->char_val = NULL;
     }
     val->type = TYPE_NULL;
-}
-
-/* Copies all data from src row to dst row.
- * If dst's capacity is insufficient, realloc's its arrays. */
-void copy_row(Row* dst, const Row* src, int column_count) {
-    (void)column_count;
-    if (!dst || !src) return;
-    if (dst == src) return;
-
-    /* Ensure dst has enough capacity for src's values */
-    if (dst->value_capacity < src->value_count) {
-        Value* new_values = realloc(dst->values, src->value_count * sizeof(Value));
-        if (!new_values) return;
-        dst->values = new_values;
-        dst->value_capacity = src->value_count;
-    }
-
-    for (int i = 0; i < src->value_count; i++) {
-        dst->values[i] = copy_value(&src->values[i]);
-    }
-    dst->value_count = src->value_count;
 }
 
 Table* find_table(const char* name) {
@@ -227,10 +171,13 @@ bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_
         if (i == exclude_row_idx) continue;
         Row* row = (Row*)alist_get(&table->rows, i);
         ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
-        if (row && col && value_equals(&row->values[col_idx], val)) {
-            log_msg(LOG_ERROR, "Constraint violation: UNIQUE on column '%s' (duplicate value '%s')",
-                    col->name, repr(val));
-            return false;
+        if (row && col) {
+            Value* row_val = (Value*)alist_get(row, col_idx);
+            if (row_val && value_equals(row_val, val)) {
+                log_msg(LOG_ERROR, "Constraint violation: UNIQUE on column '%s' (duplicate value '%s')",
+                        col->name, repr(val));
+                return false;
+            }
         }
     }
     return true;
@@ -275,8 +222,11 @@ bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
     for (int i = 0; i < ref_row_count; i++) {
         Row* ref_row = (Row*)alist_get(&ref_table->rows, i);
         ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, ref_col_idx);
-        if (ref_row && ref_col && value_equals(&ref_row->values[ref_col_idx], val)) {
-            return true;
+        if (ref_row && ref_col) {
+            Value* ref_val = (Value*)alist_get(ref_row, ref_col_idx);
+            if (ref_val && value_equals(ref_val, val)) {
+                return true;
+            }
         }
     }
 
@@ -441,12 +391,13 @@ void index_table_column(const char* table_name, const char* column_name, const c
     int row_count = alist_length(&table->rows);
     for (int i = 0; i < row_count; i++) {
         Row* row = (Row*)alist_get(&table->rows, i);
-        if (!row || row->value_count <= column_idx) continue;
+        if (!row || alist_length(row) <= column_idx) continue;
 
         IndexEntry* entry = malloc(sizeof(IndexEntry));
         if (!entry) continue;
 
-        entry->key = copy_value(&row->values[column_idx]);
+        Value* row_val = (Value*)alist_get(row, column_idx);
+        entry->key = copy_value(row_val);
         entry->row_index = i;
         entry->next = NULL;
 

@@ -909,7 +909,7 @@ static Value parse_value(ParseContext* ctx) {
             val.float_val = atof(current_token->value);
         } else {
             val.type = TYPE_INT;
-            val.int_val = atoi(current_token->value);
+            val.int_val = atol(current_token->value);
         }
         advance();
         return val;
@@ -1126,6 +1126,8 @@ static Expr* parse_primary(ParseContext* ctx) {
         return NULL;
     }
 
+    expr->alias[0] = '\0';
+
     if (match(TOKEN_IDENTIFIER)) {
         log_msg(LOG_DEBUG, "parse_primary: Parsing identifier '%s'", current_token->value);
         expr->type = EXPR_COLUMN;
@@ -1162,7 +1164,7 @@ static Expr* parse_primary(ParseContext* ctx) {
                 expr->value.float_val = atof(current_token->value);
             } else {
                 expr->value.type = TYPE_INT;
-                expr->value.int_val = atoi(current_token->value);
+                expr->value.int_val = atol(current_token->value);
             }
         }
         advance();
@@ -1223,6 +1225,7 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
     if (match(TOKEN_NOT)) {
         log_msg(LOG_DEBUG, "parse_unary_expr: Parsing NOT expression");
         Expr* expr = malloc(sizeof(Expr));
+        expr->alias[0] = '\0';
         expr->type = EXPR_UNARY_OP;
         expr->unary.op = OP_NOT;
         advance();
@@ -1236,6 +1239,7 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
     if (match(TOKEN_EXISTS)) {
         log_msg(LOG_DEBUG, "parse_unary_expr: Parsing EXISTS expression");
         Expr* expr = malloc(sizeof(Expr));
+        expr->alias[0] = '\0';
         expr->type = EXPR_SUBQUERY;
         advance();
         if (!expect(ctx, TOKEN_LPAREN, "EXISTS")) {
@@ -1291,6 +1295,7 @@ static Expr* parse_subquery(ParseContext* ctx) {
         return NULL;
     }
 
+    expr->alias[0] = '\0';
     expr->type = EXPR_SUBQUERY;
     expr->subquery.subquery = subquery_ast;
 
@@ -1308,6 +1313,7 @@ static Expr* parse_comparison_expr(ParseContext* ctx) {
            match(TOKEN_LESS_EQUAL) || match(TOKEN_GREATER) || match(TOKEN_GREATER_EQUAL) ||
            match(TOKEN_LIKE)) {
         Expr* expr = malloc(sizeof(Expr));
+        expr->alias[0] = '\0';
         expr->type = EXPR_BINARY_OP;
         OperatorType op;
 
@@ -1366,6 +1372,7 @@ static Expr* parse_and_expr(ParseContext* ctx) {
     while (match(TOKEN_AND)) {
         log_msg(LOG_DEBUG, "parse_and_expr: Found AND operator");
         Expr* expr = malloc(sizeof(Expr));
+        expr->alias[0] = '\0';
         expr->type = EXPR_BINARY_OP;
         expr->binary.op = OP_AND;
         advance();
@@ -1393,6 +1400,7 @@ static Expr* parse_or_expr(ParseContext* ctx) {
     while (match(TOKEN_OR)) {
         log_msg(LOG_DEBUG, "parse_or_expr: Found OR operator");
         Expr* expr = malloc(sizeof(Expr));
+        expr->alias[0] = '\0';
         expr->type = EXPR_BINARY_OP;
         expr->binary.op = OP_OR;
         advance();
@@ -1790,7 +1798,7 @@ static ASTNode* parse_select(ParseContext* ctx) {
             free(node);
             return NULL;
         }
-        node->select.limit = atoi(current_token->value);
+        node->select.limit = atol(current_token->value);
         advance();
     }
 
