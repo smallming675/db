@@ -152,7 +152,7 @@ static void free_expr_contents(Expr* expr) {
     }
 }
 
-const char* token_type_name(TokenType type) {
+static const char* token_type_name(TokenType type) {
     switch (type) {
         case TOKEN_KEYWORD:
             return "KEYWORD";

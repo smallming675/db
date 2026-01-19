@@ -1,6 +1,3 @@
-#include "executor.h"
-
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,7 +6,6 @@
 #include "executor_internal.h"
 #include "logger.h"
 #include "table.h"
-#include "values.h"
 
 void free_row_contents(void* ptr) {
     ArrayList* row = (ArrayList*)ptr;

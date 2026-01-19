@@ -55,7 +55,7 @@ static void calculate_column_widths(QueryResult* result, ColumnWidth* col_widths
     }
 }
 
-void print_table_separator(ColumnWidth* col_widths, int col_count, int style) {
+static void print_table_separator(ColumnWidth* col_widths, int col_count, int style) {
     if (style == 0) {
         printf("+");
         for (int j = 0; j < col_count; j++) {
@@ -103,7 +103,7 @@ void print_table_separator(ColumnWidth* col_widths, int col_count, int style) {
     }
 }
 
-void print_table_header(QueryResult* result, ColumnWidth* col_widths, int col_count) {
+static void print_table_header(QueryResult* result, ColumnWidth* col_widths, int col_count) {
     printf("\u2502");
     for (int j = 0; j < col_count; j++) {
         char* name = *(char**)alist_get(&result->column_names, j);
@@ -116,7 +116,7 @@ void print_table_header(QueryResult* result, ColumnWidth* col_widths, int col_co
     printf("\n");
 }
 
-void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count, int row_idx) {
+static void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count, int row_idx) {
     printf("\u2502");
     for (int j = 0; j < col_count; j++) {
         Value* val = (Value*)alist_get(&result->values, row_idx * col_count + j);

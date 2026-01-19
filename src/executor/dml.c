@@ -1,11 +1,10 @@
-#include "executor.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "arraylist.h"
 #include "db.h"
+#include "executor.h"
 #include "executor_internal.h"
 #include "logger.h"
 #include "table.h"
@@ -97,8 +96,8 @@ void exec_insert_row_ast(ASTNode* ast) {
 
         bool success;
         if (has_columns) {
-            success = insert_row_with_columns(table, value_row, schema_col_count,
-                                               value_count, &ins->columns);
+            success = insert_row_with_columns(table, value_row, schema_col_count, value_count,
+                                              &ins->columns);
         } else {
             success = insert_row_without_columns(table, value_row, value_count);
         }
@@ -160,14 +159,13 @@ void exec_delete_row_ast(ASTNode* ast) {
             deleted_rows++;
         } else {
             Row* kept = (Row*)alist_append(&kept_rows);
-            if (kept) {
-                alist_init(kept, sizeof(Value), free_value);
-                int src_len = alist_length(row);
-                for (int k = 0; k < src_len; k++) {
-                    Value* src_val = (Value*)alist_get(row, k);
-                    Value* dst_val = (Value*)alist_append(kept);
-                    *dst_val = copy_string_value(src_val);
-                }
+            if (!kept) continue;
+            alist_init(kept, sizeof(Value), free_value);
+            int src_len = alist_length(row);
+            for (int k = 0; k < src_len; k++) {
+                Value* src_val = (Value*)alist_get(row, k);
+                Value* dst_val = (Value*)alist_append(kept);
+                *dst_val = copy_string_value(src_val);
             }
         }
     }

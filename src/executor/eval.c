@@ -65,8 +65,8 @@ bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
     }
 }
 
-bool eval_cmp_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
-                        const TableDef* right_schema, int left_col_count) {
+static bool eval_cmp_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
+                               const TableDef* right_schema, int left_col_count) {
     Expr* left = expr->binary.left;
     Expr* right = expr->binary.right;
     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
@@ -89,8 +89,8 @@ bool eval_cmp_operation(const Expr* expr, const Row* row, const TableDef* left_s
     }
     return false;
 }
-bool eval_binary_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
-                           const TableDef* right_schema, int left_col_count) {
+static bool eval_binary_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
+                                  const TableDef* right_schema, int left_col_count) {
     bool left_val =
         eval_expression_for_join(expr->binary.left, row, left_schema, right_schema, left_col_count);
     bool right_val = eval_expression_for_join(expr->binary.right, row, left_schema, right_schema,

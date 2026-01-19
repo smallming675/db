@@ -1,0 +1,529 @@
+Checking src/executor/column.c ...
+1/23 files checked 0% done
+Checking src/executor/ddl.c ...
+2/23 files checked 1% done
+Checking src/executor/dml.c ...
+3/23 files checked 3% done
+Checking src/executor/eval.c ...
+4/23 files checked 8% done
+Checking src/executor/output.c ...
+5/23 files checked 9% done
+Checking src/executor/scalar.c ...
+6/23 files checked 13% done
+Checking src/executor/select.c ...
+src/executor/select.c:493:16: warning: If memory allocation fails, then there is a possible null pointer dereference: name_copy [nullPointerOutOfMemory]
+        strcpy(name_copy, name);
+               ^
+src/executor/select.c:492:33: note: Assuming allocation function fails
+        char* name_copy = malloc(strlen(name) + 1);
+                                ^
+src/executor/select.c:492:33: note: Assignment 'name_copy=malloc(strlen(name)+1)', assigned value is 0
+        char* name_copy = malloc(strlen(name) + 1);
+                                ^
+src/executor/select.c:493:16: note: Null pointer dereference
+        strcpy(name_copy, name);
+               ^
+7/23 files checked 21% done
+Checking src/executor.c ...
+8/23 files checked 22% done
+Checking src/logger.c ...
+9/23 files checked 23% done
+Checking src/main.c ...
+10/23 files checked 26% done
+Checking src/parser.c ...
+src/parser.c:1030:24: error: Invalid sscanf() argument nr 1. A nul-terminated string is required. [invalidFunctionArgStr]
+                sscanf(&high, "%x", &byte);
+                       ^
+src/parser.c:1031:24: error: Invalid sscanf() argument nr 1. A nul-terminated string is required. [invalidFunctionArgStr]
+                sscanf(&low, "%x", &byte);
+                       ^
+src/parser.c:1293:9: error: Memory leak: expr [memleak]
+        return inner;
+        ^
+src/parser.c:1772:5: error: Memory leak: star_expr [memleak]
+    } else {
+    ^
+src/parser.c:1317:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1316:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1317:9: note: Null pointer dereference
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1318:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->type = EXPR_UNARY_OP;
+        ^
+src/parser.c:1316:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1318:9: note: Null pointer dereference
+        expr->type = EXPR_UNARY_OP;
+        ^
+src/parser.c:1319:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->unary.op = OP_NOT;
+        ^
+src/parser.c:1316:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1319:9: note: Null pointer dereference
+        expr->unary.op = OP_NOT;
+        ^
+src/parser.c:1321:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->unary.operand = parse_unary_expr(ctx);
+        ^
+src/parser.c:1316:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1321:9: note: Null pointer dereference
+        expr->unary.operand = parse_unary_expr(ctx);
+        ^
+src/parser.c:1322:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        if (!expr->unary.operand) {
+             ^
+src/parser.c:1316:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1322:14: note: Null pointer dereference
+        if (!expr->unary.operand) {
+             ^
+src/parser.c:1331:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1330:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1330:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1331:9: note: Null pointer dereference
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1332:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->type = EXPR_SUBQUERY;
+        ^
+src/parser.c:1330:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1330:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1332:9: note: Null pointer dereference
+        expr->type = EXPR_SUBQUERY;
+        ^
+src/parser.c:1405:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1404:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1405:9: note: Null pointer dereference
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1406:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->type = EXPR_BINARY_OP;
+        ^
+src/parser.c:1404:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1406:9: note: Null pointer dereference
+        expr->type = EXPR_BINARY_OP;
+        ^
+src/parser.c:1439:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.op = op;
+        ^
+src/parser.c:1404:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1439:9: note: Null pointer dereference
+        expr->binary.op = op;
+        ^
+src/parser.c:1440:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.left = left;
+        ^
+src/parser.c:1404:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1440:9: note: Null pointer dereference
+        expr->binary.left = left;
+        ^
+src/parser.c:1441:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.right = parse_unary_expr(ctx);
+        ^
+src/parser.c:1404:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1441:9: note: Null pointer dereference
+        expr->binary.right = parse_unary_expr(ctx);
+        ^
+src/parser.c:1442:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        if (!expr->binary.right) {
+             ^
+src/parser.c:1404:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1442:14: note: Null pointer dereference
+        if (!expr->binary.right) {
+             ^
+src/parser.c:1464:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1463:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1464:9: note: Null pointer dereference
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1465:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->type = EXPR_BINARY_OP;
+        ^
+src/parser.c:1463:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1465:9: note: Null pointer dereference
+        expr->type = EXPR_BINARY_OP;
+        ^
+src/parser.c:1466:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.op = OP_AND;
+        ^
+src/parser.c:1463:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1466:9: note: Null pointer dereference
+        expr->binary.op = OP_AND;
+        ^
+src/parser.c:1468:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.left = left;
+        ^
+src/parser.c:1463:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1468:9: note: Null pointer dereference
+        expr->binary.left = left;
+        ^
+src/parser.c:1469:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.right = parse_comparison_expr(ctx);
+        ^
+src/parser.c:1463:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1469:9: note: Null pointer dereference
+        expr->binary.right = parse_comparison_expr(ctx);
+        ^
+src/parser.c:1470:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        if (!expr->binary.right) {
+             ^
+src/parser.c:1463:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1470:14: note: Null pointer dereference
+        if (!expr->binary.right) {
+             ^
+src/parser.c:1492:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1491:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1492:9: note: Null pointer dereference
+        expr->alias[0] = '\0';
+        ^
+src/parser.c:1493:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->type = EXPR_BINARY_OP;
+        ^
+src/parser.c:1491:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1493:9: note: Null pointer dereference
+        expr->type = EXPR_BINARY_OP;
+        ^
+src/parser.c:1494:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.op = OP_OR;
+        ^
+src/parser.c:1491:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1494:9: note: Null pointer dereference
+        expr->binary.op = OP_OR;
+        ^
+src/parser.c:1496:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.left = left;
+        ^
+src/parser.c:1491:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1496:9: note: Null pointer dereference
+        expr->binary.left = left;
+        ^
+src/parser.c:1497:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        expr->binary.right = parse_and_expr(ctx);
+        ^
+src/parser.c:1491:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1497:9: note: Null pointer dereference
+        expr->binary.right = parse_and_expr(ctx);
+        ^
+src/parser.c:1498:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+        if (!expr->binary.right) {
+             ^
+src/parser.c:1491:28: note: Assuming allocation function fails
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+        Expr* expr = malloc(sizeof(Expr));
+                           ^
+src/parser.c:1498:14: note: Null pointer dereference
+        if (!expr->binary.right) {
+             ^
+11/23 files checked 61% done
+Checking src/table.c ...
+12/23 files checked 66% done
+Checking src/tests/test_aggregates.c ...
+13/23 files checked 69% done
+Checking src/tests/test_ddl.c ...
+14/23 files checked 73% done
+Checking src/tests/test_dml.c ...
+15/23 files checked 78% done
+Checking src/tests/test_joins.c ...
+16/23 files checked 80% done
+Checking src/tests/test_scalar.c ...
+17/23 files checked 82% done
+Checking src/tests/test_select.c ...
+18/23 files checked 86% done
+Checking src/tests/test_subqueries.c ...
+19/23 files checked 87% done
+Checking src/tests/test_util.c ...
+20/23 files checked 89% done
+Checking src/tests/tests.c ...
+21/23 files checked 91% done
+Checking src/tokenizer.c ...
+22/23 files checked 96% done
+Checking src/values.c ...
+23/23 files checked 100% done
+src/logger.c:84:6: style: The function 'suggest_similar' is never used. [unusedFunction]
+void suggest_similar(const char *input, const char *candidates[], int candidate_count,
+     ^
+src/logger.c:107:10: style: The function 'log_level_from_str' is never used. [unusedFunction]
+LogLevel log_level_from_str(const char* level_str) {
+         ^
+src/logger.c:135:6: style: The function 'show_prominent_error' is never used. [unusedFunction]
+void show_prominent_error(const char* fmt, ...) {
+     ^
+src/table.c:24:6: style: The function 'copy_row' is never used. [unusedFunction]
+void copy_row(Row* dst, const Row* src, int column_count) {
+     ^
+src/table.c:51:8: style: The function 'create_table' is never used. [unusedFunction]
+Table* create_table(const char* name, int initial_row_capacity) {
+       ^
+src/table.c:69:6: style: The function 'free_table' is never used. [unusedFunction]
+void free_table(Table* table) {
+     ^
+src/table.c:168:6: style: The function 'check_not_null_constraint' is never used. [unusedFunction]
+bool check_not_null_constraint(Table* table, int col_idx, Value* val) {
+     ^
+src/table.c:178:6: style: The function 'check_unique_constraint' is never used. [unusedFunction]
+bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_row_idx) {
+     ^
+src/tests/test_joins.c:10:6: style: The function 'test_inner_join' is never used. [unusedFunction]
+void test_inner_join(void) {
+     ^
+src/tests/test_joins.c:30:6: style: The function 'test_left_join' is never used. [unusedFunction]
+void test_left_join(void) {
+     ^
+src/tests/test_joins.c:49:6: style: The function 'test_join_multiple_matches' is never used. [unusedFunction]
+void test_join_multiple_matches(void) {
+     ^
+src/tests/test_joins.c:68:6: style: The function 'test_join_no_matches' is never used. [unusedFunction]
+void test_join_no_matches(void) {
+     ^
+src/tests/test_joins.c:86:6: style: The function 'test_join_empty_table' is never used. [unusedFunction]
+void test_join_empty_table(void) {
+     ^
+src/tests/test_joins.c:102:6: style: The function 'test_join_syntax_variations' is never used. [unusedFunction]
+void test_join_syntax_variations(void) {
+     ^
+src/tests/test_joins.c:121:6: style: The function 'test_self_join' is never used. [unusedFunction]
+void test_self_join(void) {
+     ^
+src/tests/test_joins.c:139:6: style: The function 'test_three_table_join' is never used. [unusedFunction]
+void test_three_table_join(void) {
+     ^
+src/tests/test_scalar.c:11:6: style: The function 'test_string_functions' is never used. [unusedFunction]
+void test_string_functions(void) {
+     ^
+src/tests/test_scalar.c:28:6: style: The function 'test_numeric_functions' is never used. [unusedFunction]
+void test_numeric_functions(void) {
+     ^
+src/tests/test_scalar.c:47:6: style: The function 'test_concat_function' is never used. [unusedFunction]
+void test_concat_function(void) {
+     ^
+src/tests/test_scalar.c:61:6: style: The function 'test_substring_function' is never used. [unusedFunction]
+void test_substring_function(void) {
+     ^
+src/tests/test_scalar.c:76:6: style: The function 'test_length_function' is never used. [unusedFunction]
+void test_length_function(void) {
+     ^
+src/tests/test_scalar.c:91:6: style: The function 'test_mod_function' is never used. [unusedFunction]
+void test_mod_function(void) {
+     ^
+src/tests/test_scalar.c:106:6: style: The function 'test_power_function' is never used. [unusedFunction]
+void test_power_function(void) {
+     ^
+src/tests/test_scalar.c:121:6: style: The function 'test_mid_function' is never used. [unusedFunction]
+void test_mid_function(void) {
+     ^
+src/tests/test_scalar.c:135:6: style: The function 'test_scalar_in_expressions' is never used. [unusedFunction]
+void test_scalar_in_expressions(void) {
+     ^
+src/tests/test_subqueries.c:10:6: style: The function 'test_subquery_with_comparison' is never used. [unusedFunction]
+void test_subquery_with_comparison(void) {
+     ^
+src/tests/test_subqueries.c:32:6: style: The function 'test_correlated_subquery' is never used. [unusedFunction]
+void test_correlated_subquery(void) {
+     ^
+src/tests/test_subqueries.c:50:6: style: The function 'test_subquery_in_insert' is never used. [unusedFunction]
+void test_subquery_in_insert(void) {
+     ^
+src/tests/test_subqueries.c:65:6: style: The function 'test_subquery_with_aggregates' is never used. [unusedFunction]
+void test_subquery_with_aggregates(void) {
+     ^
+src/tests/test_subqueries.c:81:6: style: The function 'test_exists_subquery' is never used. [unusedFunction]
+void test_exists_subquery(void) {
+     ^
+src/tests/test_subqueries.c:97:6: style: The function 'test_nested_subquery' is never used. [unusedFunction]
+void test_nested_subquery(void) {
+     ^
+src/tests/test_subqueries.c:114:6: style: The function 'test_subquery_with_join' is never used. [unusedFunction]
+void test_subquery_with_join(void) {
+     ^
+src/tests/test_subqueries.c:134:6: style: The function 'test_scalar_subquery' is never used. [unusedFunction]
+void test_scalar_subquery(void) {
+     ^
+src/tests/test_util.c:80:6: style: The function 'assert_false' is never used. [unusedFunction]
+void assert_false(bool condition, const char* format, ...) { assert_true(!condition, format); }
+     ^
+src/tests/test_util.c:129:6: style: The function 'assert_ptr_null' is never used. [unusedFunction]
+void assert_ptr_null(void* ptr, const char* format, ...) {
+     ^
+src/tests/test_util.c:141:6: style: The function 'assert_float_eq' is never used. [unusedFunction]
+void assert_float_eq(double expected, double actual, double epsilon, const char* format, ...) {
+     ^
+src/values.c:90:7: style: The function 'convert_value' is never used. [unusedFunction]
+Value convert_value(const Value* val, DataType target_type) {
+      ^
+src/values.c:95:6: style: The function 'try_convert_value' is never used. [unusedFunction]
+bool try_convert_value(const Value* val, DataType target_type, Value* out_result) {
+     ^
+src/values.c:304:7: style: The function 'compute_aggregate' is never used. [unusedFunction]
+Value compute_aggregate(AggFuncType func_type, AggState* state, DataType return_type) {
+      ^
+src/parser.c:381:6: style: The function 'parse_error_set' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+void parse_error_set(ParseContext* ctx, ParseErrorCode code, const char* message,
+     ^
+src/parser.c:540:13: style: The function 'parse_error_code_str' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+const char* parse_error_code_str(ParseErrorCode code) {
+            ^
+src/parser.c:2364:10: style: The function 'parse_with_context' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+ASTNode* parse_with_context(ParseContext* ctx, Token* tokens) {
+         ^
+src/table.c:79:7: style: The function 'copy_value' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+Value copy_value(const Value* src) {
+      ^
+src/table.c:129:8: style: The function 'get_table' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+Table* get_table(const char* name) { return find_table(name); }
+       ^
+src/table.c:142:6: style: The function 'value_equals' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+bool value_equals(const Value* a, const Value* b) {
+     ^
+src/table.c:265:5: style: The function 'hash_value' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+int hash_value(const Value* value, int bucket_count) {
+    ^
+src/table.c:326:8: style: The function 'find_index' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+Index* find_index(const char* index_name) {
+       ^
+src/values.c:13:5: style: The function 'time_hour' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+int time_hour(unsigned int time_val) { return (time_val >> 12) & 0xFF; }
+    ^
+src/values.c:14:5: style: The function 'time_minute' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+int time_minute(unsigned int time_val) { return (time_val >> 6) & 0x3F; }
+    ^
+src/values.c:15:5: style: The function 'time_second' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+int time_second(unsigned int time_val) { return time_val & 0x3F; }
+    ^
+src/values.c:16:5: style: The function 'date_year' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+int date_year(unsigned int date_val) { return (date_val >> 9) & 0x3FFFFF; }
+    ^
+src/values.c:17:5: style: The function 'date_month' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+int date_month(unsigned int date_val) { return (date_val >> 5) & 0xF; }
+    ^
+src/values.c:18:5: style: The function 'date_day' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+int date_day(unsigned int date_val) { return date_val & 0x1F; }
+    ^
