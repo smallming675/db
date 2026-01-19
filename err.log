@@ -1,30 +1,18 @@
-Checking src/executor/column.c ...
-1/23 files checked 0% done
-Checking src/executor/ddl.c ...
-2/23 files checked 1% done
-Checking src/executor/dml.c ...
-3/23 files checked 3% done
-Checking src/executor/eval.c ...
-4/23 files checked 8% done
-Checking src/executor/output.c ...
-5/23 files checked 9% done
-Checking src/executor/scalar.c ...
-6/23 files checked 13% done
-Checking src/executor/select.c ...
-src/executor/select.c:493:16: warning: If memory allocation fails, then there is a possible null pointer dereference: name_copy [nullPointerOutOfMemory]
-        strcpy(name_copy, name);
-               ^
-src/executor/select.c:492:33: note: Assuming allocation function fails
-        char* name_copy = malloc(strlen(name) + 1);
-                                ^
-src/executor/select.c:492:33: note: Assignment 'name_copy=malloc(strlen(name)+1)', assigned value is 0
-        char* name_copy = malloc(strlen(name) + 1);
-                                ^
-src/executor/select.c:493:16: note: Null pointer dereference
-        strcpy(name_copy, name);
-               ^
-7/23 files checked 21% done
 Checking src/executor.c ...
+1/23 files checked 1% done
+Checking src/executor/column.c ...
+2/23 files checked 1% done
+Checking src/executor/ddl.c ...
+3/23 files checked 2% done
+Checking src/executor/dml.c ...
+4/23 files checked 4% done
+Checking src/executor/eval.c ...
+5/23 files checked 9% done
+Checking src/executor/output.c ...
+6/23 files checked 10% done
+Checking src/executor/scalar.c ...
+7/23 files checked 14% done
+Checking src/executor/select.c ...
 8/23 files checked 22% done
 Checking src/logger.c ...
 9/23 files checked 23% done
@@ -40,307 +28,223 @@ src/parser.c:1031:24: error: Invalid sscanf() argument nr 1. A nul-terminated st
 src/parser.c:1293:9: error: Memory leak: expr [memleak]
         return inner;
         ^
-src/parser.c:1772:5: error: Memory leak: star_expr [memleak]
+src/parser.c:1790:5: error: Memory leak: star_expr [memleak]
     } else {
     ^
-src/parser.c:1317:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1422:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->alias[0] = '\0';
         ^
-src/parser.c:1316:28: note: Assuming allocation function fails
+src/parser.c:1421:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1421:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1317:9: note: Null pointer dereference
+src/parser.c:1422:9: note: Null pointer dereference
         expr->alias[0] = '\0';
         ^
-src/parser.c:1318:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
-        expr->type = EXPR_UNARY_OP;
-        ^
-src/parser.c:1316:28: note: Assuming allocation function fails
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1318:9: note: Null pointer dereference
-        expr->type = EXPR_UNARY_OP;
-        ^
-src/parser.c:1319:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
-        expr->unary.op = OP_NOT;
-        ^
-src/parser.c:1316:28: note: Assuming allocation function fails
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1319:9: note: Null pointer dereference
-        expr->unary.op = OP_NOT;
-        ^
-src/parser.c:1321:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
-        expr->unary.operand = parse_unary_expr(ctx);
-        ^
-src/parser.c:1316:28: note: Assuming allocation function fails
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1321:9: note: Null pointer dereference
-        expr->unary.operand = parse_unary_expr(ctx);
-        ^
-src/parser.c:1322:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
-        if (!expr->unary.operand) {
-             ^
-src/parser.c:1316:28: note: Assuming allocation function fails
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1316:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1322:14: note: Null pointer dereference
-        if (!expr->unary.operand) {
-             ^
-src/parser.c:1331:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
-        expr->alias[0] = '\0';
-        ^
-src/parser.c:1330:28: note: Assuming allocation function fails
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1330:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1331:9: note: Null pointer dereference
-        expr->alias[0] = '\0';
-        ^
-src/parser.c:1332:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
-        expr->type = EXPR_SUBQUERY;
-        ^
-src/parser.c:1330:28: note: Assuming allocation function fails
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1330:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1332:9: note: Null pointer dereference
-        expr->type = EXPR_SUBQUERY;
-        ^
-src/parser.c:1405:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
-        expr->alias[0] = '\0';
-        ^
-src/parser.c:1404:28: note: Assuming allocation function fails
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
-        Expr* expr = malloc(sizeof(Expr));
-                           ^
-src/parser.c:1405:9: note: Null pointer dereference
-        expr->alias[0] = '\0';
-        ^
-src/parser.c:1406:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1423:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->type = EXPR_BINARY_OP;
         ^
-src/parser.c:1404:28: note: Assuming allocation function fails
+src/parser.c:1421:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1421:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1406:9: note: Null pointer dereference
+src/parser.c:1423:9: note: Null pointer dereference
         expr->type = EXPR_BINARY_OP;
         ^
-src/parser.c:1439:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1456:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.op = op;
         ^
-src/parser.c:1404:28: note: Assuming allocation function fails
+src/parser.c:1421:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1421:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1439:9: note: Null pointer dereference
+src/parser.c:1456:9: note: Null pointer dereference
         expr->binary.op = op;
         ^
-src/parser.c:1440:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1457:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.left = left;
         ^
-src/parser.c:1404:28: note: Assuming allocation function fails
+src/parser.c:1421:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1421:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1440:9: note: Null pointer dereference
+src/parser.c:1457:9: note: Null pointer dereference
         expr->binary.left = left;
         ^
-src/parser.c:1441:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1458:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.right = parse_unary_expr(ctx);
         ^
-src/parser.c:1404:28: note: Assuming allocation function fails
+src/parser.c:1421:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1421:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1441:9: note: Null pointer dereference
+src/parser.c:1458:9: note: Null pointer dereference
         expr->binary.right = parse_unary_expr(ctx);
         ^
-src/parser.c:1442:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1459:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         if (!expr->binary.right) {
              ^
-src/parser.c:1404:28: note: Assuming allocation function fails
+src/parser.c:1421:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1404:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1421:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1442:14: note: Null pointer dereference
+src/parser.c:1459:14: note: Null pointer dereference
         if (!expr->binary.right) {
              ^
-src/parser.c:1464:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1481:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->alias[0] = '\0';
         ^
-src/parser.c:1463:28: note: Assuming allocation function fails
+src/parser.c:1480:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1480:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1464:9: note: Null pointer dereference
+src/parser.c:1481:9: note: Null pointer dereference
         expr->alias[0] = '\0';
         ^
-src/parser.c:1465:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1482:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->type = EXPR_BINARY_OP;
         ^
-src/parser.c:1463:28: note: Assuming allocation function fails
+src/parser.c:1480:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1480:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1465:9: note: Null pointer dereference
+src/parser.c:1482:9: note: Null pointer dereference
         expr->type = EXPR_BINARY_OP;
         ^
-src/parser.c:1466:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1483:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.op = OP_AND;
         ^
-src/parser.c:1463:28: note: Assuming allocation function fails
+src/parser.c:1480:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1480:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1466:9: note: Null pointer dereference
+src/parser.c:1483:9: note: Null pointer dereference
         expr->binary.op = OP_AND;
         ^
-src/parser.c:1468:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1485:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.left = left;
         ^
-src/parser.c:1463:28: note: Assuming allocation function fails
+src/parser.c:1480:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1480:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1468:9: note: Null pointer dereference
+src/parser.c:1485:9: note: Null pointer dereference
         expr->binary.left = left;
         ^
-src/parser.c:1469:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1486:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.right = parse_comparison_expr(ctx);
         ^
-src/parser.c:1463:28: note: Assuming allocation function fails
+src/parser.c:1480:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1480:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1469:9: note: Null pointer dereference
+src/parser.c:1486:9: note: Null pointer dereference
         expr->binary.right = parse_comparison_expr(ctx);
         ^
-src/parser.c:1470:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1487:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         if (!expr->binary.right) {
              ^
-src/parser.c:1463:28: note: Assuming allocation function fails
+src/parser.c:1480:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1463:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1480:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1470:14: note: Null pointer dereference
+src/parser.c:1487:14: note: Null pointer dereference
         if (!expr->binary.right) {
              ^
-src/parser.c:1492:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1509:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->alias[0] = '\0';
         ^
-src/parser.c:1491:28: note: Assuming allocation function fails
+src/parser.c:1508:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1508:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1492:9: note: Null pointer dereference
+src/parser.c:1509:9: note: Null pointer dereference
         expr->alias[0] = '\0';
         ^
-src/parser.c:1493:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1510:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->type = EXPR_BINARY_OP;
         ^
-src/parser.c:1491:28: note: Assuming allocation function fails
+src/parser.c:1508:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1508:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1493:9: note: Null pointer dereference
+src/parser.c:1510:9: note: Null pointer dereference
         expr->type = EXPR_BINARY_OP;
         ^
-src/parser.c:1494:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1511:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.op = OP_OR;
         ^
-src/parser.c:1491:28: note: Assuming allocation function fails
+src/parser.c:1508:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1508:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1494:9: note: Null pointer dereference
+src/parser.c:1511:9: note: Null pointer dereference
         expr->binary.op = OP_OR;
         ^
-src/parser.c:1496:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1513:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.left = left;
         ^
-src/parser.c:1491:28: note: Assuming allocation function fails
+src/parser.c:1508:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1508:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1496:9: note: Null pointer dereference
+src/parser.c:1513:9: note: Null pointer dereference
         expr->binary.left = left;
         ^
-src/parser.c:1497:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1514:9: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         expr->binary.right = parse_and_expr(ctx);
         ^
-src/parser.c:1491:28: note: Assuming allocation function fails
+src/parser.c:1508:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1508:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1497:9: note: Null pointer dereference
+src/parser.c:1514:9: note: Null pointer dereference
         expr->binary.right = parse_and_expr(ctx);
         ^
-src/parser.c:1498:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
+src/parser.c:1515:14: warning: If memory allocation fails, then there is a possible null pointer dereference: expr [nullPointerOutOfMemory]
         if (!expr->binary.right) {
              ^
-src/parser.c:1491:28: note: Assuming allocation function fails
+src/parser.c:1508:28: note: Assuming allocation function fails
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1491:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
+src/parser.c:1508:28: note: Assignment 'expr=malloc(sizeof(Expr))', assigned value is 0
         Expr* expr = malloc(sizeof(Expr));
                            ^
-src/parser.c:1498:14: note: Null pointer dereference
+src/parser.c:1515:14: note: Null pointer dereference
         if (!expr->binary.right) {
              ^
 11/23 files checked 61% done
@@ -497,7 +401,7 @@ void parse_error_set(ParseContext* ctx, ParseErrorCode code, const char* message
 src/parser.c:540:13: style: The function 'parse_error_code_str' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 const char* parse_error_code_str(ParseErrorCode code) {
             ^
-src/parser.c:2364:10: style: The function 'parse_with_context' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+src/parser.c:2382:10: style: The function 'parse_with_context' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 ASTNode* parse_with_context(ParseContext* ctx, Token* tokens) {
          ^
 src/table.c:92:7: style: The function 'copy_value' should have static linkage since it is not used outside of its translation unit. [staticFunction]

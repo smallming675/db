@@ -1314,12 +1314,17 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
     if (match(TOKEN_NOT)) {
         log_msg(LOG_DEBUG, "parse_unary_expr: Parsing NOT expression");
         Expr* expr = malloc(sizeof(Expr));
-        expr->alias[0] = '\0';
+        if (!expr) {
+            log_msg(LOG_ERROR, "parse_unary_expr: Memory allocation failed");
+            return NULL;
+        }
+        memset(expr, 0, sizeof(Expr));
         expr->type = EXPR_UNARY_OP;
         expr->unary.op = OP_NOT;
         advance();
         expr->unary.operand = parse_unary_expr(ctx);
         if (!expr->unary.operand) {
+            log_msg(LOG_ERROR, "parse_unary_expr: Failed to parse NOT operand");
             free(expr);
             return NULL;
         }
@@ -1328,7 +1333,11 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
     if (match(TOKEN_EXISTS)) {
         log_msg(LOG_DEBUG, "parse_unary_expr: Parsing EXISTS expression");
         Expr* expr = malloc(sizeof(Expr));
-        expr->alias[0] = '\0';
+        if (!expr) {
+            log_msg(LOG_ERROR, "parse_unary_expr: Memory allocation failed");
+            return NULL;
+        }
+        memset(expr, 0, sizeof(Expr));
         expr->type = EXPR_SUBQUERY;
         advance();
         if (!expect(ctx, TOKEN_LPAREN, "EXISTS")) {
@@ -1337,6 +1346,10 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
         }
         Expr* subquery_expr = parse_subquery(ctx);
         if (!subquery_expr) {
+            log_msg(LOG_ERROR, "parse_unary_expr: Failed to parse EXISTS subquery");
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
+                            "Failed to parse subquery in EXISTS expression",
+                            "valid SELECT statement", "NULL", NULL);
             free(expr);
             return NULL;
         }
@@ -1351,7 +1364,11 @@ static Expr* parse_unary_expr(ParseContext* ctx) {
         }
         return expr;
     }
-    return parse_primary(ctx);
+    Expr* primary = parse_primary(ctx);
+    if (!primary) {
+        return NULL;
+    }
+    return primary;
 }
 
 static Expr* parse_subquery(ParseContext* ctx) {
@@ -1754,6 +1771,7 @@ static ASTNode* parse_select(ParseContext* ctx) {
         Expr* star_expr = malloc(sizeof(Expr));
         if (star_expr) {
             star_expr->type = EXPR_VALUE;
+            star_expr->value.type = TYPE_STRING;
             star_expr->alias[0] = '\0';
             star_expr->value.char_val = malloc(2);
             strcpy(star_expr->value.char_val, "*");
@@ -2494,6 +2512,7 @@ void free_ast(ASTNode* ast) {
                 if (row) alist_destroy(row);
             }
             alist_destroy(&ast->insert.value_rows);
+            alist_destroy(&ast->insert.columns);
             break;
         }
         case AST_CREATE_TABLE:
