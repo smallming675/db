@@ -1,6 +1,8 @@
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "arraylist.h"
 #include "db.h"
 #include "executor_internal.h"
 #include "logger.h"
@@ -134,15 +136,6 @@ bool eval_expression_for_join(const Expr* expr, const Row* row, const TableDef* 
         default:
             return false;
     }
-}
-
-static Value copy_string_value(const Value* src) {
-    Value copy = *src;
-    if (src->type == TYPE_STRING && src->char_val) {
-        copy.char_val = malloc(strlen(src->char_val) + 1);
-        strcpy(copy.char_val, src->char_val);
-    }
-    return copy;
 }
 
 static Value eval_arithmetic_op(OperatorType op, Value left, Value right) {
