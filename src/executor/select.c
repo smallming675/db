@@ -490,6 +490,10 @@ static void setup_query_result(QueryResult** result, Table* table, SelectNode* s
                 alias[0] ? alias : (expr[0]->type == EXPR_COLUMN ? expr[0]->column_name : "expr");
         }
         char* name_copy = malloc(strlen(name) + 1);
+        if (!name_copy) {
+            log_msg(LOG_ERROR, "setup_query_result: Failed to allocate memory for column name");
+            continue;
+        }
         strcpy(name_copy, name);
         char** slot = (char**)alist_append(&(*result)->column_names);
         *slot = name_copy;

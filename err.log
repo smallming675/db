@@ -377,19 +377,22 @@ LogLevel log_level_from_str(const char* level_str) {
 src/logger.c:135:6: style: The function 'show_prominent_error' is never used. [unusedFunction]
 void show_prominent_error(const char* fmt, ...) {
      ^
-src/table.c:24:6: style: The function 'copy_row' is never used. [unusedFunction]
+src/table.c:29:6: style: The function 'create_row' is never used. [unusedFunction]
+Row* create_row(int initial_capacity) {
+     ^
+src/table.c:37:6: style: The function 'copy_row' is never used. [unusedFunction]
 void copy_row(Row* dst, const Row* src, int column_count) {
      ^
-src/table.c:51:8: style: The function 'create_table' is never used. [unusedFunction]
+src/table.c:64:8: style: The function 'create_table' is never used. [unusedFunction]
 Table* create_table(const char* name, int initial_row_capacity) {
        ^
-src/table.c:69:6: style: The function 'free_table' is never used. [unusedFunction]
+src/table.c:82:6: style: The function 'free_table' is never used. [unusedFunction]
 void free_table(Table* table) {
      ^
-src/table.c:168:6: style: The function 'check_not_null_constraint' is never used. [unusedFunction]
+src/table.c:181:6: style: The function 'check_not_null_constraint' is never used. [unusedFunction]
 bool check_not_null_constraint(Table* table, int col_idx, Value* val) {
      ^
-src/table.c:178:6: style: The function 'check_unique_constraint' is never used. [unusedFunction]
+src/table.c:191:6: style: The function 'check_unique_constraint' is never used. [unusedFunction]
 bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_row_idx) {
      ^
 src/tests/test_joins.c:10:6: style: The function 'test_inner_join' is never used. [unusedFunction]
@@ -485,6 +488,9 @@ bool try_convert_value(const Value* val, DataType target_type, Value* out_result
 src/values.c:304:7: style: The function 'compute_aggregate' is never used. [unusedFunction]
 Value compute_aggregate(AggFuncType func_type, AggState* state, DataType return_type) {
       ^
+src/parser.c:367:6: style: The function 'parse_error_init' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+void parse_error_init(ParseContext* ctx, const char* input, Token* tokens, int token_count) {
+     ^
 src/parser.c:381:6: style: The function 'parse_error_set' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 void parse_error_set(ParseContext* ctx, ParseErrorCode code, const char* message,
      ^
@@ -494,19 +500,19 @@ const char* parse_error_code_str(ParseErrorCode code) {
 src/parser.c:2364:10: style: The function 'parse_with_context' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 ASTNode* parse_with_context(ParseContext* ctx, Token* tokens) {
          ^
-src/table.c:79:7: style: The function 'copy_value' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+src/table.c:92:7: style: The function 'copy_value' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 Value copy_value(const Value* src) {
       ^
-src/table.c:129:8: style: The function 'get_table' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+src/table.c:142:8: style: The function 'get_table' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 Table* get_table(const char* name) { return find_table(name); }
        ^
-src/table.c:142:6: style: The function 'value_equals' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+src/table.c:155:6: style: The function 'value_equals' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 bool value_equals(const Value* a, const Value* b) {
      ^
-src/table.c:265:5: style: The function 'hash_value' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+src/table.c:278:5: style: The function 'hash_value' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 int hash_value(const Value* value, int bucket_count) {
     ^
-src/table.c:326:8: style: The function 'find_index' should have static linkage since it is not used outside of its translation unit. [staticFunction]
+src/table.c:339:8: style: The function 'find_index' should have static linkage since it is not used outside of its translation unit. [staticFunction]
 Index* find_index(const char* index_name) {
        ^
 src/values.c:13:5: style: The function 'time_hour' should have static linkage since it is not used outside of its translation unit. [staticFunction]
