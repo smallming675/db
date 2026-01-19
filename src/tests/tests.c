@@ -12,6 +12,9 @@ void test_drop_table(void);
 void test_create_table_with_foreign_key(void);
 void test_create_table_multiple_columns(void);
 void test_create_table_new_types(void);
+void test_foreign_key_validation(void);
+void test_foreign_key_self_reference(void);
+void test_foreign_key_multiple_references(void);
 
 void test_insert_single_row(void);
 void test_insert_multiple_values(void);
@@ -110,6 +113,9 @@ int main(void) {
     test_create_table_with_foreign_key();
     test_create_table_multiple_columns();
     test_create_table_new_types();
+    test_foreign_key_validation();
+    test_foreign_key_self_reference();
+    test_foreign_key_multiple_references();
 
     log_msg(LOG_INFO, "\n=== DML Tests ===");
     test_insert_single_row();

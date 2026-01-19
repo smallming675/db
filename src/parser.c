@@ -813,6 +813,46 @@ static bool parse_column_def(ParseContext* ctx, ColumnDef* col) {
                                 token_type_name(current_token->type), NULL);
                 return false;
             }
+        } else if (current_token->type == TOKEN_REFERENCES) {
+            advance();
+            if (current_token->type == TOKEN_IDENTIFIER) {
+                size_t table_name_len = strlen(current_token->value);
+                size_t copy_len = table_name_len < MAX_TABLE_NAME_LEN - 1
+                                      ? table_name_len
+                                      : MAX_TABLE_NAME_LEN - 1;
+                memcpy(col->references_table, current_token->value, copy_len);
+                col->references_table[copy_len] = '\0';
+                advance();
+                if (current_token->type == TOKEN_LPAREN) {
+                    advance();
+                    if (current_token->type == TOKEN_IDENTIFIER) {
+                        size_t col_name_len = strlen(current_token->value);
+                        size_t copy_len = col_name_len < MAX_COLUMN_NAME_LEN - 1
+                                              ? col_name_len
+                                              : MAX_COLUMN_NAME_LEN - 1;
+                        memcpy(col->references_column, current_token->value, copy_len);
+                        col->references_column[copy_len] = '\0';
+                        advance();
+                        if (!expect(ctx, TOKEN_RPAREN, "REFERENCES")) {
+                            return false;
+                        }
+                    } else {
+                        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                                        "Expected column name in REFERENCES",
+                                        "column name", token_type_name(current_token->type),
+                                        NULL);
+                        return false;
+                    }
+                }
+                col->flags |= COL_FLAG_FOREIGN_KEY;
+                log_msg(LOG_DEBUG, "parse_column_def: Column '%s' REFERENCES %s.%s",
+                        col->name, col->references_table, col->references_column);
+            } else {
+                parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                                "Expected table name in REFERENCES", "table name",
+                                token_type_name(current_token->type), NULL);
+                return false;
+            }
         } else if (current_token->type == TOKEN_KEYWORD) {
             log_msg(LOG_WARN, "parse_column_def: Unknown keyword '%s', skipping",
                     current_token->value);

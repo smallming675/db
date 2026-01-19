@@ -56,6 +56,13 @@ void exec_insert_row_ast(ASTNode* ast) {
                     if (val) {
                         Value new_val = copy_string_value(&cv->value);
                         *val = new_val;
+
+                        if (!check_foreign_key_constraint(table, col_idx, val)) {
+                            log_msg(LOG_ERROR, "INSERT aborted due to foreign key constraint violation");
+                            alist_destroy(row);
+                            alist_remove(&table->rows, alist_length(&table->rows) - 1);
+                            return;
+                        }
                     }
                 }
             }
@@ -65,6 +72,13 @@ void exec_insert_row_ast(ASTNode* ast) {
                 if (cv) {
                     Value* val = (Value*)alist_append(row);
                     *val = copy_string_value(&cv->value);
+
+                    if (!check_foreign_key_constraint(table, i, val)) {
+                        log_msg(LOG_ERROR, "INSERT aborted due to foreign key constraint violation");
+                        alist_destroy(row);
+                        alist_remove(&table->rows, alist_length(&table->rows) - 1);
+                        return;
+                    }
                 }
             }
         }
@@ -91,8 +105,16 @@ void exec_update_row_ast(ASTNode* ast) {
             ColumnValue* cv = (ColumnValue*)alist_get(&update->values, j);
             if (!(cv && cv->column_idx >= 0)) continue;
             Value* row_val = (Value*)alist_get(row, cv->column_idx);
+            Value new_val = copy_string_value(&cv->value);
+
+            if (!check_foreign_key_constraint(table, cv->column_idx, &new_val)) {
+                log_msg(LOG_ERROR, "UPDATE aborted due to foreign key constraint violation");
+                free_value(&new_val);
+                return;
+            }
+
             free_value(row_val);
-            *row_val = copy_string_value(&cv->value);
+            *row_val = new_val;
         }
         updated++;
     }
