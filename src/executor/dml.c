@@ -11,6 +11,67 @@
 #include "table.h"
 #include "values.h"
 
+static bool insert_row_with_columns(Table* table, ArrayList* value_row, int schema_col_count,
+                                    int value_count, ArrayList* columns) {
+    Row* row = (Row*)alist_append(&table->rows);
+    if (!row) return false;
+
+    alist_init(row, sizeof(Value), free_value);
+
+    for (int i = 0; i < schema_col_count; i++) {
+        Value* val = (Value*)alist_append(row);
+        val->type = TYPE_NULL;
+    }
+
+    for (int i = 0; i < value_count; i++) {
+        int* col_idx_ptr = (int*)alist_get(columns, i);
+        int col_idx = col_idx_ptr ? *col_idx_ptr : i;
+        if (col_idx < 0 || col_idx >= schema_col_count) continue;
+
+        ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
+        if (!cv) continue;
+
+        Value* val = (Value*)alist_get(row, col_idx);
+        if (!val) continue;
+
+        Value new_val = copy_string_value(&cv->value);
+        *val = new_val;
+
+        if (!check_foreign_key_constraint(table, col_idx, val)) {
+            log_msg(LOG_ERROR, "INSERT aborted due to foreign key constraint violation");
+            alist_destroy(row);
+            alist_remove(&table->rows, alist_length(&table->rows) - 1);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool insert_row_without_columns(Table* table, ArrayList* value_row, int value_count) {
+    Row* row = (Row*)alist_append(&table->rows);
+    if (!row) return false;
+
+    alist_init(row, sizeof(Value), free_value);
+
+    for (int i = 0; i < value_count; i++) {
+        ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
+        if (!cv) continue;
+
+        Value* val = (Value*)alist_append(row);
+        *val = copy_string_value(&cv->value);
+
+        if (!check_foreign_key_constraint(table, i, val)) {
+            log_msg(LOG_ERROR, "INSERT aborted due to foreign key constraint violation");
+            alist_destroy(row);
+            alist_remove(&table->rows, alist_length(&table->rows) - 1);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void exec_insert_row_ast(ASTNode* ast) {
     InsertNode* ins = &ast->insert;
     Table* table = get_table_by_id(ins->table_id);
@@ -34,56 +95,15 @@ void exec_insert_row_ast(ASTNode* ast) {
         int value_count = alist_length(value_row);
         if (value_count == 0) continue;
 
-        Row* row = (Row*)alist_append(&table->rows);
-        if (!row) continue;
-
-        alist_init(row, sizeof(Value), free_value);
-
+        bool success;
         if (has_columns) {
-            for (int i = 0; i < schema_col_count; i++) {
-                Value* val = (Value*)alist_append(row);
-                val->type = TYPE_NULL;
-            }
-
-            for (int i = 0; i < value_count; i++) {
-                int* col_idx_ptr = (int*)alist_get(&ins->columns, i);
-                int col_idx = col_idx_ptr ? *col_idx_ptr : i;
-                if (col_idx < 0 || col_idx >= schema_col_count) continue;
-
-                ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
-                if (cv) {
-                    Value* val = (Value*)alist_get(row, col_idx);
-                    if (val) {
-                        Value new_val = copy_string_value(&cv->value);
-                        *val = new_val;
-
-                        if (!check_foreign_key_constraint(table, col_idx, val)) {
-                            log_msg(LOG_ERROR, "INSERT aborted due to foreign key constraint violation");
-                            alist_destroy(row);
-                            alist_remove(&table->rows, alist_length(&table->rows) - 1);
-                            return;
-                        }
-                    }
-                }
-            }
+            success = insert_row_with_columns(table, value_row, schema_col_count,
+                                               value_count, &ins->columns);
         } else {
-            for (int i = 0; i < value_count; i++) {
-                ColumnValue* cv = (ColumnValue*)alist_get(value_row, i);
-                if (cv) {
-                    Value* val = (Value*)alist_append(row);
-                    *val = copy_string_value(&cv->value);
-
-                    if (!check_foreign_key_constraint(table, i, val)) {
-                        log_msg(LOG_ERROR, "INSERT aborted due to foreign key constraint violation");
-                        alist_destroy(row);
-                        alist_remove(&table->rows, alist_length(&table->rows) - 1);
-                        return;
-                    }
-                }
-            }
+            success = insert_row_without_columns(table, value_row, value_count);
         }
 
-        inserted++;
+        if (success) inserted++;
     }
 
     log_msg(LOG_INFO, "Inserted %d rows into table '%s'", inserted, table->name);

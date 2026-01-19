@@ -138,62 +138,91 @@ bool eval_expression_for_join(const Expr* expr, const Row* row, const TableDef* 
     }
 }
 
+static Value eval_add_op(Value left, Value right) {
+    Value result = {0};
+    if (left.type == TYPE_INT && right.type == TYPE_INT) {
+        result.type = TYPE_INT;
+        result.int_val = left.int_val + right.int_val;
+    } else {
+        result.type = TYPE_FLOAT;
+        double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
+        double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
+        result.float_val = l + r;
+    }
+    return result;
+}
+
+static Value eval_subtract_op(Value left, Value right) {
+    Value result = {0};
+    if (left.type == TYPE_INT && right.type == TYPE_INT) {
+        result.type = TYPE_INT;
+        result.int_val = left.int_val - right.int_val;
+    } else {
+        result.type = TYPE_FLOAT;
+        double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
+        double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
+        result.float_val = l - r;
+    }
+    return result;
+}
+
+static Value eval_multiply_op(Value left, Value right) {
+    Value result = {0};
+    if (left.type == TYPE_INT && right.type == TYPE_INT) {
+        result.type = TYPE_INT;
+        result.int_val = left.int_val * right.int_val;
+    } else {
+        result.type = TYPE_FLOAT;
+        double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
+        double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
+        result.float_val = l * r;
+    }
+    return result;
+}
+
+static Value eval_divide_op(Value left, Value right) {
+    Value result = {0};
+    double denom = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
+    if (denom != 0) {
+        if (left.type == TYPE_INT && right.type == TYPE_INT) {
+            result.type = TYPE_INT;
+            result.int_val = left.int_val / right.int_val;
+        } else {
+            result.type = TYPE_FLOAT;
+            double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
+            result.float_val = l / denom;
+        }
+    }
+    return result;
+}
+
+static Value eval_modulus_op(Value left, Value right) {
+    Value result = {0};
+    if (left.type == TYPE_INT && right.type == TYPE_INT) {
+        result.type = TYPE_INT;
+        result.int_val = left.int_val % right.int_val;
+    }
+    return result;
+}
+
 static Value eval_arithmetic_op(OperatorType op, Value left, Value right) {
     Value result = {0};
 
     switch (op) {
         case OP_ADD:
-            if (left.type == TYPE_INT && right.type == TYPE_INT) {
-                result.type = TYPE_INT;
-                result.int_val = left.int_val + right.int_val;
-            } else {
-                result.type = TYPE_FLOAT;
-                double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
-                double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
-                result.float_val = l + r;
-            }
+            result = eval_add_op(left, right);
             break;
         case OP_SUBTRACT:
-            if (left.type == TYPE_INT && right.type == TYPE_INT) {
-                result.type = TYPE_INT;
-                result.int_val = left.int_val - right.int_val;
-            } else {
-                result.type = TYPE_FLOAT;
-                double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
-                double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
-                result.float_val = l - r;
-            }
+            result = eval_subtract_op(left, right);
             break;
         case OP_MULTIPLY:
-            if (left.type == TYPE_INT && right.type == TYPE_INT) {
-                result.type = TYPE_INT;
-                result.int_val = left.int_val * right.int_val;
-            } else {
-                result.type = TYPE_FLOAT;
-                double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
-                double r = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
-                result.float_val = l * r;
-            }
+            result = eval_multiply_op(left, right);
             break;
-        case OP_DIVIDE: {
-            double denom = right.type == TYPE_INT ? (double)right.int_val : right.float_val;
-            if (denom != 0) {
-                if (left.type == TYPE_INT && right.type == TYPE_INT) {
-                    result.type = TYPE_INT;
-                    result.int_val = left.int_val / right.int_val;
-                } else {
-                    result.type = TYPE_FLOAT;
-                    double l = left.type == TYPE_INT ? (double)left.int_val : left.float_val;
-                    result.float_val = l / denom;
-                }
-            }
+        case OP_DIVIDE:
+            result = eval_divide_op(left, right);
             break;
-        }
         case OP_MODULUS:
-            if (left.type == TYPE_INT && right.type == TYPE_INT) {
-                result.type = TYPE_INT;
-                result.int_val = left.int_val % right.int_val;
-            }
+            result = eval_modulus_op(left, right);
             break;
         default:
             break;
@@ -243,6 +272,47 @@ static Value eval_subquery(const Expr* expr) {
 
 Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
 
+static Value eval_binary_op(Expr* expr, const Row* row, const TableDef* schema) {
+    Value left = eval_select_expression(expr->binary.left, row, schema);
+    Value right = eval_select_expression(expr->binary.right, row, schema);
+
+    switch (expr->binary.op) {
+        case OP_ADD:
+        case OP_SUBTRACT:
+        case OP_MULTIPLY:
+        case OP_DIVIDE:
+        case OP_MODULUS:
+            return eval_arithmetic_op(expr->binary.op, left, right);
+        case OP_EQUALS:
+        case OP_NOT_EQUALS:
+        case OP_LESS:
+        case OP_LESS_EQUAL:
+        case OP_GREATER:
+        case OP_GREATER_EQUAL:
+        case OP_LIKE:
+        case OP_AND:
+        case OP_OR:
+            return eval_comparison_op(expr->binary.op, left, right);
+        default:
+            break;
+    }
+    Value result = {0};
+    result.type = TYPE_NULL;
+    return result;
+}
+
+static Value eval_unary_op(Expr* expr, const Row* row, const TableDef* schema) {
+    Value result = {0};
+    Value operand = eval_select_expression(expr->unary.operand, row, schema);
+    if (expr->unary.op == OP_NOT) {
+        result.type = TYPE_INT;
+        result.int_val = (operand.type == TYPE_NULL) ? 1 : 0;
+    } else {
+        result = operand;
+    }
+    return result;
+}
+
 Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
     Value result = {0};
     result.type = TYPE_NULL;
@@ -256,42 +326,10 @@ Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema)
         }
         case EXPR_VALUE:
             return copy_string_value(&expr->value);
-        case EXPR_BINARY_OP: {
-            Value left = eval_select_expression(expr->binary.left, row, schema);
-            Value right = eval_select_expression(expr->binary.right, row, schema);
-
-            switch (expr->binary.op) {
-                case OP_ADD:
-                case OP_SUBTRACT:
-                case OP_MULTIPLY:
-                case OP_DIVIDE:
-                case OP_MODULUS:
-                    return eval_arithmetic_op(expr->binary.op, left, right);
-                case OP_EQUALS:
-                case OP_NOT_EQUALS:
-                case OP_LESS:
-                case OP_LESS_EQUAL:
-                case OP_GREATER:
-                case OP_GREATER_EQUAL:
-                case OP_LIKE:
-                case OP_AND:
-                case OP_OR:
-                    return eval_comparison_op(expr->binary.op, left, right);
-                default:
-                    break;
-            }
-            break;
-        }
-        case EXPR_UNARY_OP: {
-            Value operand = eval_select_expression(expr->unary.operand, row, schema);
-            if (expr->unary.op == OP_NOT) {
-                result.type = TYPE_INT;
-                result.int_val = (operand.type == TYPE_NULL) ? 1 : 0;
-            } else {
-                result = operand;
-            }
-            break;
-        }
+        case EXPR_BINARY_OP:
+            return eval_binary_op(expr, row, schema);
+        case EXPR_UNARY_OP:
+            return eval_unary_op(expr, row, schema);
         case EXPR_AGGREGATE_FUNC:
             log_msg(LOG_ERROR,
                     "eval_select_expression: Cannot evaluate aggregate in non-aggregate context");

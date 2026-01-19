@@ -15,6 +15,19 @@
 static void copy_columns_to_result(Table* result, Table* source, int col_count);
 static Row* create_joined_row(ArrayList* left, ArrayList* right, int left_cols, int right_cols);
 static Row* create_left_join_null_row(ArrayList* left, int right_cols);
+static void collect_filtered_indices(Table* table, SelectNode* select,
+                                     int row_count, ArrayList* filtered_indices);
+static void compute_aggregates(Table* table, ArrayList* filtered_indices, int loop_count,
+                              SelectNode* select, int expr_count);
+static Value compute_single_aggregate(Table* table, ArrayList* filtered_indices, int loop_count,
+                                      SelectNode* select, AggFuncType func_type,
+                                      Expr* operand, bool count_all);
+static bool init_join_result_table(Table* result_table, SelectNode* select,
+                                   Table* left_table, Table* right_table);
+static void process_join_rows(Table* result_table, SelectNode* select,
+                              Table* left_table, Table* right_table,
+                              int left_cols, int right_cols);
+static void copy_result_to_global_tables(Table* result_table);
 
 uint16_t exec_join_ast(ASTNode* ast) {
     SelectNode* select = &ast->select;
@@ -30,12 +43,33 @@ uint16_t exec_join_ast(ASTNode* ast) {
     join_counter++;
     uint16_t result_id = join_counter;
 
-    Table* result_table = malloc(sizeof(Table));
-    if (!result_table) return 0;
+    Table result_table;
+    memset(&result_table, 0, sizeof(Table));
 
+    if (!init_join_result_table(&result_table, select, left_table, right_table)) {
+        return 0;
+    }
+
+    int left_cols = alist_length(&left_table->schema.columns);
+    int right_cols = alist_length(&right_table->schema.columns);
+
+    process_join_rows(&result_table, select, left_table, right_table, left_cols, right_cols);
+
+    copy_result_to_global_tables(&result_table);
+
+    log_msg(LOG_INFO, "Created join table '%s' with %d rows", result_table.name,
+            alist_length(&result_table.rows));
+
+    alist_destroy(&result_table.rows);
+    alist_destroy(&result_table.schema.columns);
+    return result_id;
+}
+
+static bool init_join_result_table(Table* result_table, SelectNode* select,
+                                   Table* left_table, Table* right_table) {
     snprintf(result_table->name, MAX_TABLE_NAME_LEN, "_join_%d_%d", select->table_id,
              select->join_table_id);
-    result_table->table_id = result_id;
+    result_table->table_id = 0;
     alist_init(&result_table->rows, sizeof(Row), free_row_contents);
     alist_init(&result_table->schema.columns, sizeof(ColumnDef), NULL);
     result_table->schema.strict = false;
@@ -45,7 +79,12 @@ uint16_t exec_join_ast(ASTNode* ast) {
 
     copy_columns_to_result(result_table, left_table, left_cols);
     copy_columns_to_result(result_table, right_table, right_cols);
+    return true;
+}
 
+static void process_join_rows(Table* result_table, SelectNode* select,
+                              Table* left_table, Table* right_table,
+                              int left_cols, int right_cols) {
     int left_rows = alist_length(&left_table->rows);
     int right_rows = alist_length(&right_table->rows);
 
@@ -60,9 +99,8 @@ uint16_t exec_join_ast(ASTNode* ast) {
 
             bool match = true;
             if (select->join_condition) {
-                match =
-                    eval_expression_for_join(select->join_condition, left_row, &left_table->schema,
-                                             &right_table->schema, left_cols);
+                match = eval_expression_for_join(select->join_condition, left_row, &left_table->schema,
+                                                 &right_table->schema, left_cols);
             }
 
             if (match) {
@@ -102,7 +140,9 @@ uint16_t exec_join_ast(ASTNode* ast) {
             }
         }
     }
+}
 
+static void copy_result_to_global_tables(Table* result_table) {
     Table* t = (Table*)alist_append(&tables);
     if (t) {
         memset(t, 0, sizeof(Table));
@@ -129,12 +169,6 @@ uint16_t exec_join_ast(ASTNode* ast) {
             }
         }
     }
-
-    log_msg(LOG_INFO, "Created join table '%s' with %d rows", result_table->name,
-            alist_length(&result_table->rows));
-
-    free(result_table);
-    return result_id;
 }
 
 static void copy_columns_to_result(Table* result, Table* source, int col_count) {
@@ -225,19 +259,33 @@ void exec_aggregate_ast(ASTNode* ast, uint8_t table_id) {
 
     ArrayList filtered_indices;
     alist_init(&filtered_indices, sizeof(int), NULL);
-    if (select->where_clause) {
-        for (int i = 0; i < row_count; i++) {
-            Row* row = (Row*)alist_get(&table->rows, i);
-            if (row && eval_expression(select->where_clause, row, &table->schema)) {
-                int* idx = (int*)alist_append(&filtered_indices);
-                *idx = i;
-            }
-        }
-    }
+
+    collect_filtered_indices(table, select, row_count, &filtered_indices);
 
     int filtered_count = alist_length(&filtered_indices);
     int loop_count = select->where_clause ? filtered_count : row_count;
 
+    compute_aggregates(table, &filtered_indices, loop_count, select, expr_count);
+
+    alist_destroy(&filtered_indices);
+    log_msg(LOG_INFO, "Aggregated table '%s' to 1 row", table->name);
+}
+
+static void collect_filtered_indices(Table* table, SelectNode* select,
+                                     int row_count, ArrayList* filtered_indices) {
+    if (!select->where_clause) return;
+
+    for (int i = 0; i < row_count; i++) {
+        Row* row = (Row*)alist_get(&table->rows, i);
+        if (row && eval_expression(select->where_clause, row, &table->schema)) {
+            int* idx = (int*)alist_append(filtered_indices);
+            *idx = i;
+        }
+    }
+}
+
+static void compute_aggregates(Table* table, ArrayList* filtered_indices, int loop_count,
+                              SelectNode* select, int expr_count) {
     for (int expr_idx = 0; expr_idx < expr_count; expr_idx++) {
         Expr** expr = (Expr**)alist_get(&select->expressions, expr_idx);
         if (!expr || !*expr) continue;
@@ -247,42 +295,43 @@ void exec_aggregate_ast(ASTNode* ast, uint8_t table_id) {
         Expr* operand = (*expr)->aggregate.operand;
         bool count_all = (*expr)->aggregate.count_all;
 
-        Value result = {0};
-        result.type = TYPE_FLOAT;
-        result.char_val = NULL;
-
-        switch (func_type) {
-            case FUNC_COUNT:
-                result = compute_count_aggregate(table, &filtered_indices, loop_count, select,
-                                                 operand, count_all);
-                break;
-            case FUNC_SUM:
-                result =
-                    compute_sum_aggregate(table, &filtered_indices, loop_count, select, operand);
-                break;
-            case FUNC_AVG:
-                result =
-                    compute_avg_aggregate(table, &filtered_indices, loop_count, select, operand);
-                break;
-            case FUNC_MIN:
-                result =
-                    compute_min_aggregate(table, &filtered_indices, loop_count, select, operand);
-                break;
-            case FUNC_MAX:
-                result =
-                    compute_max_aggregate(table, &filtered_indices, loop_count, select, operand);
-                break;
-            default:
-                result.float_val = 0;
-        }
+        Value result = compute_single_aggregate(table, filtered_indices, loop_count,
+                                                 select, func_type, operand, count_all);
 
         Value result_copy = result;
         void* slot = alist_append(&g_aggregate_results);
         *(Value*)slot = result_copy;
     }
+}
 
-    alist_destroy(&filtered_indices);
-    log_msg(LOG_INFO, "Aggregated table '%s' to 1 row", table->name);
+static Value compute_single_aggregate(Table* table, ArrayList* filtered_indices, int loop_count,
+                                      SelectNode* select, AggFuncType func_type,
+                                      Expr* operand, bool count_all) {
+    Value result = {0};
+    result.type = TYPE_FLOAT;
+    result.char_val = NULL;
+
+    switch (func_type) {
+        case FUNC_COUNT:
+            result = compute_count_aggregate(table, filtered_indices, loop_count,
+                                             select, operand, count_all);
+            break;
+        case FUNC_SUM:
+            result = compute_sum_aggregate(table, filtered_indices, loop_count, select, operand);
+            break;
+        case FUNC_AVG:
+            result = compute_avg_aggregate(table, filtered_indices, loop_count, select, operand);
+            break;
+        case FUNC_MIN:
+            result = compute_min_aggregate(table, filtered_indices, loop_count, select, operand);
+            break;
+        case FUNC_MAX:
+            result = compute_max_aggregate(table, filtered_indices, loop_count, select, operand);
+            break;
+        default:
+            result.float_val = 0;
+    }
+    return result;
 }
 
 Value compute_count_aggregate(Table* table, ArrayList* filtered_indices, int loop_count,
