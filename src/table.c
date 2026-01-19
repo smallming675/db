@@ -49,7 +49,6 @@ void copy_row(Row* dst, const Row* src, int column_count) {
     }
 }
 
-/* Callback function for alist_destroy() to free Table objects */
 void free_table_internal(void* ptr) {
     Table* table = (Table*)ptr;
     if (!table) return;
@@ -69,7 +68,6 @@ Table* create_table(const char* name, int initial_row_capacity) {
         return NULL;
     }
 
-    /* alist_append() returns a pointer to the newly appended element */
     Table* table = (Table*)alist_append(&tables);
     strncpy(table->name, name, MAX_TABLE_NAME_LEN - 1);
     table->name[MAX_TABLE_NAME_LEN - 1] = '\0';
@@ -81,8 +79,6 @@ Table* create_table(const char* name, int initial_row_capacity) {
     return table;
 }
 
-/* Frees all resources associated with a table.
- * used when manually removing a table (not via alist_remove). */
 void free_table(Table* table) {
     if (!table) return;
     if (table->rows.data != NULL) {
@@ -131,6 +127,16 @@ Table* find_table(const char* name) {
         }
     }
     return NULL;
+}
+
+uint8_t find_table_id_by_name(const char* name) {
+    for (int i = 0; i < alist_length(&tables); i++) {
+        Table* table = (Table*)alist_get(&tables, i);
+        if (table && strcmp(table->name, name) == 0) {
+            return table->table_id;
+        }
+    }
+    return 0;
 }
 
 Table* get_table(const char* name) { return find_table(name); }
@@ -193,7 +199,8 @@ bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_
         if (row && col) {
             Value* row_val = (Value*)alist_get(row, col_idx);
             if (row_val && value_equals(row_val, val)) {
-                log_msg(LOG_ERROR, "Constraint violation: UNIQUE on column '%s' (duplicate value '%s')",
+                log_msg(LOG_ERROR,
+                        "Constraint violation: UNIQUE on column '%s' (duplicate value '%s')",
                         col->name, repr(val));
                 return false;
             }
@@ -314,7 +321,6 @@ static void free_index_entry(IndexEntry* entry) {
     free(entry);
 }
 
-/* Free an index structure and all its entries */
 static void free_index(void* ptr) {
     Index* index = (Index*)ptr;
     if (!index) return;
@@ -330,7 +336,6 @@ static void free_index(void* ptr) {
     log_msg(LOG_DEBUG, "free_index: Index '%s' freed", index->index_name);
 }
 
-/* Find an index by name */
 Index* find_index(const char* index_name) {
     if (!index_name) return NULL;
 

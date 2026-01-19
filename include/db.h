@@ -94,8 +94,8 @@ typedef struct {
 } ColumnDef;
 
 typedef struct {
-  ArrayList columns;
-  ArrayList check_constraints;
+  ArrayList columns;           /* ColumnDef* */
+  ArrayList check_constraints; /* Expr* */
   bool strict;
 } TableDef;
 
@@ -155,6 +155,7 @@ typedef struct {
 
 typedef struct {
   char column_name[MAX_COLUMN_NAME_LEN];
+  int8_t column_idx;
   Value value;
 } ColumnValue;
 
@@ -269,22 +270,22 @@ typedef enum {
 
 typedef struct {
   char table_name[MAX_TABLE_NAME_LEN];
-  ArrayList columns;
+  ArrayList columns;  /* ColumnDef* */
   bool strict;
 } CreateTableNode;
 
 typedef struct {
   uint8_t table_id;
-  ArrayList value_rows;
-  ArrayList columns;
+  ArrayList value_rows;  /* ArrayList<ArrayList<Value>> */
+  ArrayList columns;     /* ColumnValue* */
 } InsertNode;
 
 typedef struct {
   uint8_t table_id;
-  ArrayList expressions;
+  ArrayList expressions;     /* Expr* */
   Expr *where_clause;
-  ArrayList order_by;
-  ArrayList order_by_desc;
+  ArrayList order_by;        /* Expr* */
+  ArrayList order_by_desc;   /* Expr* */
   int order_by_count;
   int limit;
   JoinType join_type;
@@ -311,7 +312,7 @@ typedef struct {
 
 typedef struct {
   uint8_t table_id;
-  ArrayList values;
+  ArrayList values;      /* ColumnValue* */
   Expr *where_clause;
 } UpdateNode;
 
@@ -342,7 +343,7 @@ typedef struct {
   char name[MAX_TABLE_NAME_LEN];
   uint8_t table_id;
   TableDef schema;
-  ArrayList rows;
+  ArrayList rows;  /* Row* (ArrayList<Value>) */
 } Table;
 
 typedef struct IndexEntry {
@@ -361,7 +362,7 @@ typedef struct {
 } Index;
 
 typedef struct {
-  ArrayList seen_values;
+  ArrayList seen_values;  /* Value* */
   double sum;
   uint32_t count;
   Value min_val;
@@ -403,11 +404,10 @@ int hash_value(const Value *value, int bucket_count);
 void clear_query_result(void);
 
 typedef struct {
-  Value *values;
-  int *rows;
-  int row_count;
+  ArrayList values;        /* Value* */
+  ArrayList rows;          /* int* */
+  ArrayList column_names;  /* char* */
   int col_count;
-  char **column_names;
 } QueryResult;
 
 QueryResult *exec_query(const char *sql);

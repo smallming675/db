@@ -9,6 +9,7 @@ extern ArrayList tables;
 
 Table* get_table_by_id(uint8_t table_id);
 Table* find_table(const char* table_name);
+uint8_t find_table_id_by_name(const char* table_name);
 void init_tables(void);
 void free_table_internal(void* ptr);
 void copy_row(Row* dst, const Row* src, int dst_value_offset);

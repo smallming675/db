@@ -34,13 +34,15 @@ static int get_str_width(const char* str) {
 
 static void calculate_column_widths(QueryResult* result, ColumnWidth* col_widths, int col_count) {
     for (int j = 0; j < col_count; j++) {
-        col_widths[j].width = get_str_width(result->column_names[j]);
+        char* name = *(char**)alist_get(&result->column_names, j);
+        col_widths[j].width = get_str_width(name);
         col_widths[j].is_numeric = true;
     }
 
-    for (int i = 0; i < result->row_count; i++) {
+    int row_count = alist_length(&result->rows);
+    for (int i = 0; i < row_count; i++) {
         for (int j = 0; j < col_count; j++) {
-            const Value* val = &result->values[i * col_count + j];
+            Value* val = (Value*)alist_get(&result->values, i * col_count + j);
             const char* str = val->type == TYPE_NULL ? "NULL" : repr(val);
             int str_width = get_str_width(str);
             bool is_numeric = (val->type == TYPE_INT || val->type == TYPE_FLOAT);
@@ -104,7 +106,7 @@ void print_table_separator(ColumnWidth* col_widths, int col_count, int style) {
 void print_table_header(QueryResult* result, ColumnWidth* col_widths, int col_count) {
     printf("\u2502");
     for (int j = 0; j < col_count; j++) {
-        const char* name = result->column_names[j];
+        char* name = *(char**)alist_get(&result->column_names, j);
         int name_width = get_str_width(name);
         int padding = col_widths[j].width - name_width;
         int left_pad = padding / 2;
@@ -117,7 +119,7 @@ void print_table_header(QueryResult* result, ColumnWidth* col_widths, int col_co
 void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count, int row_idx) {
     printf("\u2502");
     for (int j = 0; j < col_count; j++) {
-        const Value* val = &result->values[row_idx * col_count + j];
+        Value* val = (Value*)alist_get(&result->values, row_idx * col_count + j);
         const char* str = val->type == TYPE_NULL ? "NULL" : repr(val);
         int str_width = get_str_width(str);
         int padding = col_widths[j].width - str_width;
@@ -129,7 +131,7 @@ void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count,
 }
 
 void print_pretty_result(QueryResult* result) {
-    if (!result || result->row_count == 0) {
+    if (!result || alist_length(&result->rows) == 0) {
         return;
     }
 
@@ -145,7 +147,8 @@ void print_pretty_result(QueryResult* result) {
     print_table_header(result, col_widths, col_count);
     print_table_separator(col_widths, col_count, 2);
 
-    for (int i = 0; i < result->row_count; i++) {
+    int row_count = alist_length(&result->rows);
+    for (int i = 0; i < row_count; i++) {
         print_row_data(result, col_widths, col_count, i);
     }
 

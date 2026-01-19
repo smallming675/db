@@ -2076,7 +2076,19 @@ static ASTNode* parse_update(ParseContext* ctx) {
         memcpy(cv->column_name, current_token->value, len);
         cv->column_name[len] = '\0';
 
-        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s'", cv->column_name);
+        cv->column_idx = -1;
+        if (table) {
+            int col_count = alist_length(&table->schema.columns);
+            for (int c = 0; c < col_count; c++) {
+                ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, c);
+                if (col && strcmp(col->name, cv->column_name) == 0) {
+                    cv->column_idx = c;
+                    break;
+                }
+            }
+        }
+
+        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s' (idx=%d)", cv->column_name, cv->column_idx);
         advance();
 
         if (!expect(ctx, TOKEN_EQUALS, "UPDATE")) {

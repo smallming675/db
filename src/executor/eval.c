@@ -234,10 +234,11 @@ static Value eval_subquery(const Expr* expr) {
     exec_ast(subquery_ast);
 
     QueryResult* last_result = get_last_query_result();
-    if (last_result && last_result->row_count > 0) {
+    if (last_result && alist_length(&last_result->rows) > 0) {
         int col_count = last_result->col_count;
         if (col_count > 0) {
-            result = copy_string_value(&last_result->values[0]);
+            Value* val = (Value*)alist_get(&last_result->values, 0);
+            if (val) result = copy_string_value(val);
         }
     }
 
