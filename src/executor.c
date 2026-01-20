@@ -108,5 +108,6 @@ void exec_ast(ASTNode* ast) {
         curr = curr->next;
     }
 
+    alist_destroy(&g_agg_res);
     log_msg(LOG_DEBUG, "exec_ast: AST execution completed");
 }

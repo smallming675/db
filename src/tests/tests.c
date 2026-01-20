@@ -92,6 +92,21 @@ void test_join_syntax_variations(void);
 void test_self_join(void);
 void test_three_table_join(void);
 
+void test_create_index(void);
+void test_create_multiple_indexes(void);
+void test_index_on_string_column(void);
+void test_drop_index(void);
+void test_index_filter_equality(void);
+void test_index_filter_with_large_table(void);
+void test_hash_join_inner(void);
+void test_hash_join_left(void);
+void test_hash_join_large_tables(void);
+void test_hash_join_multiple_matches(void);
+void test_hash_join_no_matches(void);
+void test_index_with_string_equality(void);
+void test_index_rebuild(void);
+void test_complex_join_with_index(void);
+
 void test_subquery_with_comparison(void);
 void test_correlated_subquery(void);
 void test_subquery_in_insert(void);
@@ -102,7 +117,7 @@ void test_subquery_with_join(void);
 void test_scalar_subquery(void);
 
 int main(void) {
-    set_log_level(LOG_INFO);
+    set_log_level(LOG_DEBUG);
     log_msg(LOG_INFO, "========================================");
     log_msg(LOG_INFO, "Running Tests...");
     log_msg(LOG_INFO, "========================================");
@@ -179,6 +194,11 @@ int main(void) {
     test_aggregate_multiple_wheres();
     test_aggregate_with_order_by_limit();
     log_msg(LOG_INFO, "All aggregate tests passed successfully!");
+    log_msg(LOG_INFO, "========================================");
+    log_msg(LOG_INFO, "\n=== Index Tests ===");
+    test_create_index();
+    test_index_filter_equality();
+    log_msg(LOG_INFO, "Index tests passed!");
     log_msg(LOG_INFO, "========================================");
     log_msg(LOG_INFO, "All tests passed successfully!");
     log_msg(LOG_INFO, "========================================");

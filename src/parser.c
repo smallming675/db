@@ -66,12 +66,11 @@ static void suggest_similar_table(ParseContext* ctx, const char* requested_name)
 
     for (int i = 0; i < alist_length(&tables); i++) {
         Table* table = (Table*)alist_get(&tables, i);
-        if (table) {
-            int dist = levenshtein_distance(requested_name, table->name);
-            if (dist < best_dist) {
-                best_dist = dist;
-                best_match = table->name;
-            }
+        if (!table) break;
+        int dist = levenshtein_distance(requested_name, table->name);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_match = table->name;
         }
     }
 
@@ -817,9 +816,8 @@ static bool parse_column_def(ParseContext* ctx, ColumnDef* col) {
             advance();
             if (current_token->type == TOKEN_IDENTIFIER) {
                 size_t table_name_len = strlen(current_token->value);
-                size_t copy_len = table_name_len < MAX_TABLE_NAME_LEN - 1
-                                      ? table_name_len
-                                      : MAX_TABLE_NAME_LEN - 1;
+                size_t copy_len = table_name_len < MAX_TABLE_NAME_LEN - 1 ? table_name_len
+                                                                          : MAX_TABLE_NAME_LEN - 1;
                 memcpy(col->references_table, current_token->value, copy_len);
                 col->references_table[copy_len] = '\0';
                 advance();
@@ -838,15 +836,14 @@ static bool parse_column_def(ParseContext* ctx, ColumnDef* col) {
                         }
                     } else {
                         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
-                                        "Expected column name in REFERENCES",
-                                        "column name", token_type_name(current_token->type),
-                                        NULL);
+                                        "Expected column name in REFERENCES", "column name",
+                                        token_type_name(current_token->type), NULL);
                         return false;
                     }
                 }
                 col->flags |= COL_FLAG_FOREIGN_KEY;
-                log_msg(LOG_DEBUG, "parse_column_def: Column '%s' REFERENCES %s.%s",
-                        col->name, col->references_table, col->references_column);
+                log_msg(LOG_DEBUG, "parse_column_def: Column '%s' REFERENCES %s.%s", col->name,
+                        col->references_table, col->references_column);
             } else {
                 parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
                                 "Expected table name in REFERENCES", "table name",
@@ -1290,6 +1287,7 @@ static Expr* parse_primary(ParseContext* ctx) {
             free(expr);
             return NULL;
         }
+        free(expr);
         return inner;
     } else {
         log_msg(LOG_WARN, "parse_primary: Unknown token type %d", current_token->type);
@@ -1419,6 +1417,10 @@ static Expr* parse_comparison_expr(ParseContext* ctx) {
            match(TOKEN_LESS_EQUAL) || match(TOKEN_GREATER) || match(TOKEN_GREATER_EQUAL) ||
            match(TOKEN_LIKE)) {
         Expr* expr = malloc(sizeof(Expr));
+        if (!expr) {
+            log_msg(LOG_ERROR, "parse_or_expr: malloc() failed");
+            return NULL;
+        }
         expr->alias[0] = '\0';
         expr->type = EXPR_BINARY_OP;
         OperatorType op;
@@ -1478,6 +1480,10 @@ static Expr* parse_and_expr(ParseContext* ctx) {
     while (match(TOKEN_AND)) {
         log_msg(LOG_DEBUG, "parse_and_expr: Found AND operator");
         Expr* expr = malloc(sizeof(Expr));
+        if (!expr) {
+            log_msg(LOG_ERROR, "parse_or_expr: malloc() failed");
+            return NULL;
+        }
         expr->alias[0] = '\0';
         expr->type = EXPR_BINARY_OP;
         expr->binary.op = OP_AND;
@@ -1506,6 +1512,11 @@ static Expr* parse_or_expr(ParseContext* ctx) {
     while (match(TOKEN_OR)) {
         log_msg(LOG_DEBUG, "parse_or_expr: Found OR operator");
         Expr* expr = malloc(sizeof(Expr));
+        if (!expr) {
+            log_msg(LOG_ERROR, "parse_or_expr: malloc() failed");
+            return NULL;
+        }
+
         expr->alias[0] = '\0';
         expr->type = EXPR_BINARY_OP;
         expr->binary.op = OP_OR;
@@ -1577,13 +1588,17 @@ static ASTNode* parse_insert(ParseContext* ctx) {
         advance();
 
         if (current_token->type == TOKEN_IDENTIFIER) {
-            log_msg(LOG_DEBUG, "parse_insert: Token after LPAREN is IDENTIFIER '%s'", current_token->value);
+            log_msg(LOG_DEBUG, "parse_insert: Token after LPAREN is IDENTIFIER '%s'",
+                    current_token->value);
             int i = 0;
-            while (current_token[i].type == TOKEN_COMMA || current_token[i].type == TOKEN_IDENTIFIER) {
-                log_msg(LOG_DEBUG, "parse_insert: Found identifier at offset %d: '%s'", i, current_token[i].value);
+            while (current_token[i].type == TOKEN_COMMA ||
+                   current_token[i].type == TOKEN_IDENTIFIER) {
+                log_msg(LOG_DEBUG, "parse_insert: Found identifier at offset %d: '%s'", i,
+                        current_token[i].value);
                 i++;
             }
-            log_msg(LOG_DEBUG, "parse_insert: After scanning, offset=%d, next token type=%d '%s'", i, current_token[i].type, current_token[i].value);
+            log_msg(LOG_DEBUG, "parse_insert: After scanning, offset=%d, next token type=%d '%s'",
+                    i, current_token[i].type, current_token[i].value);
             if (current_token[i].type == TOKEN_RPAREN) {
                 log_msg(LOG_DEBUG, "parse_insert: Next token is RPAREN - treating as column list");
                 has_columns = true;
@@ -1620,10 +1635,12 @@ static ASTNode* parse_insert(ParseContext* ctx) {
                     return NULL;
                 }
 
-                if (current_token->type != TOKEN_KEYWORD || strcasecmp(current_token->value, "VALUES") != 0) {
-                    parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'VALUES' after column list",
-                                    "VALUES keyword", token_type_name(current_token->type),
-                                    "INSERT syntax: INSERT INTO table_name (col1, col2) VALUES (...)");
+                if (current_token->type != TOKEN_KEYWORD ||
+                    strcasecmp(current_token->value, "VALUES") != 0) {
+                    parse_error_set(
+                        ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected 'VALUES' after column list",
+                        "VALUES keyword", token_type_name(current_token->type),
+                        "INSERT syntax: INSERT INTO table_name (col1, col2) VALUES (...)");
                     alist_destroy(&column_indices);
                     free(node);
                     return NULL;
@@ -1656,8 +1673,9 @@ static ASTNode* parse_insert(ParseContext* ctx) {
         log_msg(LOG_DEBUG, "parse_insert: Found VALUES keyword");
         advance();
     } else {
-        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected '(' or 'VALUES' after table name",
-                        "LPAREN or VALUES", token_type_name(current_token->type),
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                        "Expected '(' or 'VALUES' after table name", "LPAREN or VALUES",
+                        token_type_name(current_token->type),
                         "INSERT syntax: INSERT INTO table_name (col1, col2) VALUES (...)\n"
                         "   or: INSERT INTO table_name VALUES (...)");
         alist_destroy(&column_indices);
@@ -2146,7 +2164,8 @@ static ASTNode* parse_update(ParseContext* ctx) {
             }
         }
 
-        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s' (idx=%d)", cv->column_name, cv->column_idx);
+        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s' (idx=%d)",
+                cv->column_name, cv->column_idx);
         advance();
 
         if (!expect(ctx, TOKEN_EQUALS, "UPDATE")) {

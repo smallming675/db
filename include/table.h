@@ -19,6 +19,8 @@ Table* create_table(const char* name, int initial_row_capacity);
 void free_table(Table* table);
 void index_table_column(const char* table_name, const char* column_name, const char* index_name);
 void drop_index_by_name(const char* index_name);
+Index* find_index_by_table_column(const char* table_name, const char* column_name);
+void lookup_index_values(const Index* index, const Value* key, ArrayList* result);
 Value copy_value(const Value* src);
 void free_value(void* ptr);
 bool check_not_null_constraint(Table* table, int col_idx, Value* val);

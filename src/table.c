@@ -11,28 +11,7 @@
 
 ArrayList tables;
 ArrayList indexes;
-static int next_table_id = 1;
-
 static void free_index(void* ptr);
-
-static void free_row_contents(void* ptr) {
-    Row* row = (Row*)ptr;
-    if (!row) return;
-    alist_destroy(row);
-}
-
-static void free_column_def_contents(void* ptr) {
-    ColumnDef* col = (ColumnDef*)ptr;
-    (void)col;
-}
-
-Row* create_row(int initial_capacity) {
-    (void)initial_capacity;
-    Row* row = malloc(sizeof(Row));
-    if (!row) return NULL;
-    alist_init(row, sizeof(Value), free_value);
-    return row;
-}
 
 void copy_row(Row* dst, const Row* src, int column_count) {
     if (!dst || !src) return;
@@ -59,24 +38,6 @@ void free_table_internal(void* ptr) {
     if (table->schema.columns.data != NULL) {
         alist_destroy(&table->schema.columns);
     }
-}
-
-Table* create_table(const char* name, int initial_row_capacity) {
-    (void)initial_row_capacity;
-    if (alist_length(&tables) >= MAX_TABLES) {
-        log_msg(LOG_ERROR, "create_table: Maximum table limit (%d) reached", MAX_TABLES);
-        return NULL;
-    }
-
-    Table* table = (Table*)alist_append(&tables);
-    strncpy(table->name, name, MAX_TABLE_NAME_LEN - 1);
-    table->name[MAX_TABLE_NAME_LEN - 1] = '\0';
-
-    table->table_id = next_table_id++;
-    alist_init(&table->rows, sizeof(Row), free_row_contents);
-    alist_init(&table->schema.columns, sizeof(ColumnDef), free_column_def_contents);
-
-    return table;
 }
 
 void free_table(Table* table) {
@@ -310,7 +271,6 @@ int hash_value(const Value* value, int bucket_count) {
     return (int)(hash % (unsigned long)bucket_count);
 }
 
-/* Free an index entry */
 static void free_index_entry(IndexEntry* entry) {
     if (!entry) return;
 
@@ -435,10 +395,17 @@ void index_table_column(const char* table_name, const char* column_name, const c
     }
 
     Index* stored = (Index*)alist_append(&indexes);
-    *stored = *index;
+    stored->bucket_count = index->bucket_count;
+    stored->buckets = index->buckets;
+    stored->entry_count = index->entry_count;
+    strcpy(stored->index_name, index->index_name);
+    strcpy(stored->table_name, index->table_name);
+    strcpy(stored->column_name, index->column_name);
 
     log_msg(LOG_INFO, "index_table_column: Created index '%s' on '%s.%s' with %d entries",
             index_name, table_name, column_name, index->entry_count);
+    
+    free(index);
 }
 
 /* Drop an index by name */
@@ -456,4 +423,33 @@ void drop_index_by_name(const char* index_name) {
     }
 
     log_msg(LOG_ERROR, "drop_index_by_name: Index '%s' not found", index_name);
+}
+
+Index* find_index_by_table_column(const char* table_name, const char* column_name) {
+    if (!table_name || !column_name) return NULL;
+
+    int index_count = alist_length(&indexes);
+    for (int i = 0; i < index_count; i++) {
+        Index* idx = (Index*)alist_get(&indexes, i);
+        if (idx && strcmp(idx->table_name, table_name) == 0 &&
+            strcasecmp(idx->column_name, column_name) == 0) {
+            return idx;
+        }
+    }
+    return NULL;
+}
+
+void lookup_index_values(const Index* index, const Value* key, ArrayList* result) {
+    if (!index || !key || !result) return;
+
+    int bucket = hash_value(key, index->bucket_count);
+    bucket = (bucket < 0) ? -bucket : bucket;
+    bucket = bucket % index->bucket_count;
+
+    for (IndexEntry* entry = index->buckets[bucket]; entry != NULL; entry = entry->next) {
+        if (value_equals(&entry->key, key)) {
+            int* row_idx = (int*)alist_append(result);
+            if (row_idx) *row_idx = entry->row_index;
+        }
+    }
 }

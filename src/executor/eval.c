@@ -6,7 +6,65 @@
 #include "db.h"
 #include "executor_internal.h"
 #include "logger.h"
+#include "table.h"
 #include "values.h"
+
+static bool is_indexable_equality(const Expr* expr, const char** col_name, Value* key_value) {
+    if (!expr || expr->type != EXPR_BINARY_OP) return false;
+    if (expr->binary.op != OP_EQUALS) return false;
+
+    Expr* left = expr->binary.left;
+    Expr* right = expr->binary.right;
+
+    if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
+        *col_name = left->column_name;
+        *key_value = copy_value(&right->value);
+        return true;
+    }
+    if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
+        *col_name = right->column_name;
+        *key_value = copy_value(&left->value);
+        return true;
+    }
+    return false;
+}
+
+bool try_index_filter(Table* table, const Expr* where_expr, ArrayList* result) {
+    if (!table || !where_expr || !result) return false;
+
+    const char* col_name = NULL;
+    Value key_value = {0};
+
+    if (is_indexable_equality(where_expr, &col_name, &key_value)) {
+        Index* index = find_index_by_table_column(table->name, col_name);
+        if (index) {
+            log_msg(LOG_DEBUG, "try_index_filter: Using index on %s.%s", table->name, col_name);
+            lookup_index_values(index, &key_value, result);
+            free_value(&key_value);
+            return true;
+        }
+        free_value(&key_value);
+    }
+    return false;
+}
+
+bool eval_cmp_expression(const Expr* expr, const Row* row, const TableDef* schema) {
+    Expr* left = expr->binary.left;
+    Expr* right = expr->binary.right;
+    if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
+        return eval_comparison(get_column_value(row, schema, left->column_name), right->value,
+                               expr->binary.op);
+    }
+    if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
+        return eval_comparison(left->value, get_column_value(row, schema, right->column_name),
+                               expr->binary.op);
+    }
+    if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
+        return eval_comparison(get_column_value(row, schema, left->column_name),
+                               get_column_value(row, schema, right->column_name), expr->binary.op);
+    }
+    return false;
+}
 
 bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
     if (!expr) return true;
@@ -33,25 +91,8 @@ bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
                 case OP_LESS_EQUAL:
                 case OP_GREATER:
                 case OP_GREATER_EQUAL:
-                case OP_LIKE: {
-                    Expr* left = expr->binary.left;
-                    Expr* right = expr->binary.right;
-                    if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
-                        return eval_comparison(get_column_value(row, schema, left->column_name),
-                                               right->value, expr->binary.op);
-                    }
-                    if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
-                        return eval_comparison(left->value,
-                                               get_column_value(row, schema, right->column_name),
-                                               expr->binary.op);
-                    }
-                    if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
-                        return eval_comparison(get_column_value(row, schema, left->column_name),
-                                               get_column_value(row, schema, right->column_name),
-                                               expr->binary.op);
-                    }
-                    return false;
-                }
+                case OP_LIKE:
+                    return eval_cmp_expression(expr, row, schema);
                 default:
                     return false;
             }

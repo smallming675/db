@@ -20,6 +20,7 @@ bool eval_expression_for_join(const Expr* expr, const Row* row,
                                int left_col_count);
 Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema);
 Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
+bool try_index_filter(Table* table, const Expr* where_expr, ArrayList* result);
 void print_pretty_result(QueryResult* result);
 QueryResult* get_last_query_result(void);
 void set_last_query_result(QueryResult* result);

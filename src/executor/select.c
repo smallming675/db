@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "arraylist.h"
 #include "db.h"
@@ -44,6 +45,229 @@ static void process_regular_result_rows(QueryResult* result, Table* table, Selec
                                         bool is_select_star, int col_count);
 static void print_query_output(QueryResult* result);
 static void free_string_ptr(void *ptr);
+
+typedef struct {
+    Value key;
+    ArrayList rows;
+} HashBucket;
+
+typedef struct {
+    HashBucket* buckets;
+    int bucket_count;
+    int total_rows;
+} HashJoinTable;
+
+static HashJoinTable* create_hash_table(int bucket_count) {
+    HashJoinTable* ht = malloc(sizeof(HashJoinTable));
+    if (!ht) return NULL;
+    ht->bucket_count = bucket_count > 0 ? bucket_count : 64;
+    ht->buckets = calloc(ht->bucket_count, sizeof(HashBucket));
+    if (!ht->buckets) {
+        free(ht);
+        return NULL;
+    }
+    ht->total_rows = 0;
+    return ht;
+}
+
+static void free_hash_table(HashJoinTable* ht) {
+    if (!ht) return;
+    if (ht->buckets) {
+        for (int i = 0; i < ht->bucket_count; i++) {
+            alist_destroy(&ht->buckets[i].rows);
+        }
+        free(ht->buckets);
+    }
+    free(ht);
+}
+
+static int get_bucket_index(const Value* key, int bucket_count) {
+    int hash = hash_value(key, bucket_count);
+    hash = (hash < 0) ? -hash : hash;
+    return hash % bucket_count;
+}
+
+static void build_hash_table(HashJoinTable* ht, Table* table, const char* key_column,
+                             const TableDef* schema) {
+    int row_count = alist_length(&table->rows);
+    int col_idx = -1;
+
+    int col_count = alist_length(&schema->columns);
+    for (int i = 0; i < col_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&schema->columns, i);
+        if (col && strcasecmp(col->name, key_column) == 0) {
+            col_idx = i;
+            break;
+        }
+    }
+
+    if (col_idx < 0) return;
+
+    for (int i = 0; i < row_count; i++) {
+        Row* row = (Row*)alist_get(&table->rows, i);
+        if (!row) continue;
+
+        Value* key_val = (Value*)alist_get(row, col_idx);
+        if (!key_val) continue;
+
+        int bucket_idx = get_bucket_index(key_val, ht->bucket_count);
+        int* row_idx = (int*)alist_append(&ht->buckets[bucket_idx].rows);
+        if (row_idx) *row_idx = i;
+        ht->total_rows++;
+    }
+}
+
+static void probe_hash_table(const HashJoinTable* ht, Table* probe_table, const char* probe_key_column,
+                             const TableDef* probe_schema, Table* build_table,
+                             Table* result_table, bool is_left_join, int left_cols, int right_cols) {
+    int probe_col_idx = -1;
+    int probe_col_count = alist_length(&probe_schema->columns);
+    for (int i = 0; i < probe_col_count; i++) {
+        ColumnDef* col = (ColumnDef*)alist_get(&probe_schema->columns, i);
+        if (col && strcasecmp(col->name, probe_key_column) == 0) {
+            probe_col_idx = i;
+            break;
+        }
+    }
+
+    if (probe_col_idx < 0) return;
+
+    int probe_rows = alist_length(&probe_table->rows);
+
+    for (int i = 0; i < probe_rows; i++) {
+        Row* probe_row = (Row*)alist_get(&probe_table->rows, i);
+        if (!probe_row) continue;
+
+        Value* probe_key = (Value*)alist_get(probe_row, probe_col_idx);
+        if (!probe_key) continue;
+
+        int bucket_idx = get_bucket_index(probe_key, ht->bucket_count);
+        ArrayList* bucket_rows = &ht->buckets[bucket_idx].rows;
+        int bucket_row_count = alist_length(bucket_rows);
+
+        if (bucket_row_count == 0) {
+            if (is_left_join) {
+                Row* new_row = create_left_join_null_row(probe_row, left_cols);
+                if (new_row) {
+                    Row* slot = (Row*)alist_append(&result_table->rows);
+                    if (slot) {
+                        memset(slot, 0, sizeof(Row));
+                        alist_init(slot, sizeof(Value), free_value);
+                        for (int k = 0; k < alist_length(new_row); k++) {
+                            Value* src_val = (Value*)alist_get(new_row, k);
+                            Value* dst_val = (Value*)alist_append(slot);
+                            *dst_val = copy_string_value(src_val);
+                        }
+                    }
+                    free(new_row);
+                }
+            }
+            continue;
+        }
+
+        for (int j = 0; j < bucket_row_count; j++) {
+            int* build_row_idx = (int*)alist_get(bucket_rows, j);
+            if (!build_row_idx) continue;
+
+            Row* build_row = (Row*)alist_get(&build_table->rows, *build_row_idx);
+            if (!build_row) continue;
+
+            Row* new_row = create_joined_row(probe_row, build_row, left_cols, right_cols);
+            if (new_row) {
+                Row* slot = (Row*)alist_append(&result_table->rows);
+                if (slot) {
+                    alist_init(slot, sizeof(Value), free_value);
+                    for (int k = 0; k < alist_length(new_row); k++) {
+                        Value* src_val = (Value*)alist_get(new_row, k);
+                        Value* dst_val = (Value*)alist_append(slot);
+                        *dst_val = copy_string_value(src_val);
+                    }
+                }
+                free(new_row);
+            }
+        }
+    }
+}
+
+static bool try_hash_join(Table* result_table, SelectNode* select, Table* left_table,
+                          Table* right_table, int left_cols, int right_cols) {
+    if (!select->join_condition) return false;
+
+    const char* left_col = NULL;
+    const char* right_col = NULL;
+
+    Expr* left = select->join_condition->binary.left;
+    Expr* right = select->join_condition->binary.right;
+
+    if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
+        left_col = left->column_name;
+        right_col = right->column_name;
+    } else {
+        return false;
+    }
+
+    int left_row_count = alist_length(&left_table->rows);
+    int right_row_count = alist_length(&right_table->rows);
+
+    bool is_left_join = (select->join_type == JOIN_LEFT);
+
+    if (left_row_count == 0 || right_row_count == 0) {
+        if (is_left_join && right_row_count == 0) {
+            for (int i = 0; i < left_row_count; i++) {
+                Row* left_row = (Row*)alist_get(&left_table->rows, i);
+                if (!left_row) continue;
+                Row* new_row = create_left_join_null_row(left_row, left_cols);
+                if (new_row) {
+                    Row* slot = (Row*)alist_append(&result_table->rows);
+                    if (slot) {
+                        memset(slot, 0, sizeof(Row));
+                        alist_init(slot, sizeof(Value), free_value);
+                        for (int k = 0; k < alist_length(new_row); k++) {
+                            Value* src_val = (Value*)alist_get(new_row, k);
+                            Value* dst_val = (Value*)alist_append(slot);
+                            *dst_val = copy_string_value(src_val);
+                        }
+                    }
+                    free(new_row);
+                }
+            }
+        }
+        return true;
+    }
+
+    HashJoinTable* ht = create_hash_table(64);
+    if (!ht) return false;
+
+    Table* build_table;
+    Table* probe_table;
+    const char* build_col;
+    const char* probe_col;
+    const TableDef* build_schema;
+    const TableDef* probe_schema;
+
+    if (left_row_count <= right_row_count) {
+        build_table = left_table;
+        probe_table = right_table;
+        build_col = left_col;
+        probe_col = right_col;
+        build_schema = &left_table->schema;
+        probe_schema = &right_table->schema;
+    } else {
+        build_table = right_table;
+        probe_table = left_table;
+        build_col = right_col;
+        probe_col = left_col;
+        build_schema = &right_table->schema;
+        probe_schema = &left_table->schema;
+    }
+
+    build_hash_table(ht, build_table, build_col, build_schema);
+    probe_hash_table(ht, probe_table, probe_col, probe_schema, build_table,
+                     result_table, is_left_join, left_cols, right_cols);
+
+    free_hash_table(ht);
+    return true;
+}
 
 uint16_t exec_join_ast(ASTNode* ast) {
     SelectNode* select = &ast->select;
@@ -102,6 +326,13 @@ static void process_join_rows(Table* result_table, SelectNode* select, Table* le
                               Table* right_table, int left_cols, int right_cols) {
     int left_rows = alist_length(&left_table->rows);
     int right_rows = alist_length(&right_table->rows);
+
+    if (left_rows > 0 && right_rows > 0) {
+        if (try_hash_join(result_table, select, left_table, right_table, left_cols, right_cols)) {
+            log_msg(LOG_DEBUG, "process_join_rows: Used hash join");
+            return;
+        }
+    }
 
     for (int i = 0; i < left_rows; i++) {
         Row* left_row = (Row*)alist_get(&left_table->rows, i);
@@ -247,14 +478,41 @@ void exec_filter_ast(ASTNode* ast, uint8_t table_id) {
     int row_count = alist_length(&table->rows);
     int match_count = 0;
 
-    for (int i = 0; i < row_count; i++) {
-        Row* row = (Row*)alist_get(&table->rows, i);
-        if (!row) continue;
+    ArrayList matching_rows;
+    alist_init(&matching_rows, sizeof(int), NULL);
 
-        if (eval_expression(select->where_clause, row, &table->schema)) {
-            match_count++;
+    bool used_index = try_index_filter(table, select->where_clause, &matching_rows);
+
+    if (used_index) {
+        match_count = alist_length(&matching_rows);
+        if (match_count > 0 && match_count < row_count) {
+            for (int i = row_count - 1; i >= 0; i--) {
+                bool keep = false;
+                for (int j = 0; j < match_count; j++) {
+                    int* match_idx = (int*)alist_get(&matching_rows, j);
+                    if (*match_idx == i) {
+                        keep = true;
+                        break;
+                    }
+                }
+                if (!keep) {
+                    alist_remove(&table->rows, i);
+                }
+            }
+        }
+        alist_destroy(&matching_rows);
+    } else {
+        for (int i = 0; i < row_count; i++) {
+            Row* row = (Row*)alist_get(&table->rows, i);
+            if (!row) continue;
+
+            if (eval_expression(select->where_clause, row, &table->schema)) {
+                match_count++;
+            }
         }
     }
+    
+    alist_destroy(&matching_rows);
 
     log_msg(LOG_INFO, "Filtered table '%s' to %d rows", table->name, match_count);
 }

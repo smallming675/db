@@ -1,6 +1,7 @@
 #include "test_util.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,7 @@ static void free_index(void* ptr) {
             }
         }
         free(index->buckets);
+        index->buckets = NULL;
     }
 }
 

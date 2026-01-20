@@ -277,7 +277,7 @@ Token* tokenize(const char* input) {
                    (isdigit(input[i + 1]) || (input[i + 1] == '.' && isdigit(input[i + 2])))) {
             char neg_value[32];
             int j = 1;
-            int len = strlen(input);
+            len = strlen(input);
             bool has_dot = false;
 
             neg_value[0] = '-';
