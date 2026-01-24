@@ -15,11 +15,11 @@ void test_insert_single_row(void) {
     exec("CREATE TABLE users (id INT, name STRING, age INT);");
     exec("INSERT INTO users VALUES (1, 'Alice', 30);");
 
-    Table* table = find_table_by_name("users");
+    Table *table = find_table_by_name("users");
     assert_ptr_not_null(table, "Table should exist");
     assert_int_eq(1, alist_length(&table->rows), "Table should have 1 row");
 
-    Row* row = (Row*)alist_get(&table->rows, 0);
+    Row *row = (Row *)alist_get(&table->rows, 0);
     assert_ptr_not_null(row, "Row should exist");
     assert_int_eq(3, alist_length(row), "Row should have 3 values");
 
@@ -34,7 +34,7 @@ void test_insert_multiple_values(void) {
     exec("CREATE TABLE numbers (id INT, value INT);");
     exec("INSERT INTO numbers VALUES (1, 100), (2, 200), (3, 300);");
 
-    Table* table = find_table_by_name("numbers");
+    Table *table = find_table_by_name("numbers");
     assert_ptr_not_null(table, "Table should exist");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
@@ -53,21 +53,19 @@ void test_insert_mixed_types(void) {
 
     reset_database();
 
-    exec(
-        "CREATE TABLE mixed_table ("
-        "id INT, "
-        "name STRING, "
-        "price FLOAT, "
-        "active INT"
-        ");");
+    exec("CREATE TABLE mixed_table ("
+         "id INT, "
+         "name STRING, "
+         "price FLOAT, "
+         "active INT"
+         ");");
 
-    exec(
-        "INSERT INTO mixed_table VALUES "
-        "(1, 'Product A', 29.99, 1), "
-        "(2, 'Product B', 49.99, 0), "
-        "(3, 'Product C', 19.99, 1);");
+    exec("INSERT INTO mixed_table VALUES "
+         "(1, 'Product A', 29.99, 1), "
+         "(2, 'Product B', 49.99, 0), "
+         "(3, 'Product C', 19.99, 1);");
 
-    Table* table = find_table_by_name("mixed_table");
+    Table *table = find_table_by_name("mixed_table");
     assert_ptr_not_null(table, "Table should exist");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
@@ -82,11 +80,11 @@ void test_insert_with_column_names(void) {
     exec("CREATE TABLE test (id INT, name STRING, age INT, city STRING);");
 
     exec("INSERT INTO test (id, name) VALUES (1, 'Alice');");
-    Table* table = find_table_by_name("test");
+    Table *table = find_table_by_name("test");
     assert_ptr_not_null(table, "Table should exist");
     assert_int_eq(1, alist_length(&table->rows), "Table should have 1 row");
 
-    Row* row = (Row*)alist_get(&table->rows, 0);
+    Row *row = (Row *)alist_get(&table->rows, 0);
     assert_ptr_not_null(row, "Row should exist");
     assert_int_eq(4, alist_length(row), "Row should have 4 values (NULLs for missing columns)");
 
@@ -119,8 +117,8 @@ void test_update_single_row(void) {
 
     exec("UPDATE products SET price = 1099.99 WHERE name = 'Laptop';");
 
-    Table* table = find_table_by_name("products");
-    Row* row = (Row*)alist_get(&table->rows, 0);
+    Table *table = find_table_by_name("products");
+    Row *row = (Row *)alist_get(&table->rows, 0);
     assert_ptr_not_null(row, "First row should exist");
 
     log_msg(LOG_INFO, "UPDATE single row tests passed");
@@ -138,7 +136,7 @@ void test_update_multiple_rows(void) {
 
     exec("UPDATE items SET price = price * 1.1 WHERE category = 'Electronics';");
 
-    Table* table = find_table_by_name("items");
+    Table *table = find_table_by_name("items");
     assert_int_eq(3, alist_length(&table->rows), "Table should still have 3 rows");
 
     log_msg(LOG_INFO, "UPDATE multiple rows tests passed");
@@ -156,7 +154,7 @@ void test_update_all_rows(void) {
 
     exec("UPDATE counters SET total = total + 5;");
 
-    Table* table = find_table_by_name("counters");
+    Table *table = find_table_by_name("counters");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
     log_msg(LOG_INFO, "UPDATE all rows tests passed");
@@ -173,7 +171,7 @@ void test_delete_single_row(void) {
 
     exec("DELETE FROM users WHERE id = 1;");
 
-    Table* table = find_table_by_name("users");
+    Table *table = find_table_by_name("users");
     assert_int_eq(1, alist_length(&table->rows), "Table should have 1 row after delete");
 
     log_msg(LOG_INFO, "DELETE single row tests passed");
@@ -191,7 +189,7 @@ void test_delete_multiple_rows(void) {
 
     exec("DELETE FROM orders WHERE status = 'completed';");
 
-    Table* table = find_table_by_name("orders");
+    Table *table = find_table_by_name("orders");
     assert_int_eq(1, alist_length(&table->rows), "Table should have 1 row remaining");
 
     log_msg(LOG_INFO, "DELETE multiple rows tests passed");
@@ -208,7 +206,7 @@ void test_delete_all_rows(void) {
 
     exec("DELETE FROM temp_data;");
 
-    Table* table = find_table_by_name("temp_data");
+    Table *table = find_table_by_name("temp_data");
     assert_int_eq(0, alist_length(&table->rows), "Table should be empty after DELETE");
 
     log_msg(LOG_INFO, "DELETE all rows tests passed");
@@ -223,7 +221,7 @@ void test_insert_with_comments(void) {
     exec("INSERT INTO comments_test VALUES (1, 100); -- Insert first row");
     exec("INSERT INTO comments_test VALUES (2, 200), (3, 300); -- Insert multiple rows");
 
-    Table* table = find_table_by_name("comments_test");
+    Table *table = find_table_by_name("comments_test");
     assert_ptr_not_null(table, "Table should exist");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
@@ -247,7 +245,7 @@ void test_multiple_statements(void) {
     result = exec("INSERT INTO multi_test VALUES (3, 'Third');");
     assert_true(result, "Third INSERT should succeed");
 
-    Table* table = find_table_by_name("multi_test");
+    Table *table = find_table_by_name("multi_test");
     assert_ptr_not_null(table, "Table should exist");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
@@ -267,7 +265,7 @@ void test_update_with_expression(void) {
     exec("UPDATE accounts SET balance = balance * 1.1 WHERE balance > 1000;");
     exec("UPDATE accounts SET balance = balance + 100 WHERE balance < 1000;");
 
-    Table* table = find_table_by_name("accounts");
+    Table *table = find_table_by_name("accounts");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
     log_msg(LOG_INFO, "UPDATE with expressions tests passed");
@@ -284,7 +282,7 @@ void test_update_multiple_columns(void) {
 
     exec("UPDATE products SET price = 24.99, quantity = 75 WHERE name = 'Widget';");
 
-    Table* table = find_table_by_name("products");
+    Table *table = find_table_by_name("products");
     assert_int_eq(2, alist_length(&table->rows), "Table should have 2 rows");
 
     log_msg(LOG_INFO, "UPDATE multiple columns tests passed");
@@ -301,7 +299,7 @@ void test_update_no_match(void) {
 
     exec("UPDATE test_update SET value = 999 WHERE value > 1000;");
 
-    Table* table = find_table_by_name("test_update");
+    Table *table = find_table_by_name("test_update");
     assert_int_eq(2, alist_length(&table->rows), "Table should still have 2 rows");
 
     log_msg(LOG_INFO, "UPDATE with no match tests passed");
@@ -321,7 +319,7 @@ void test_delete_with_and_or(void) {
     exec("DELETE FROM tasks WHERE priority = 1 AND status = 'pending';");
     exec("DELETE FROM tasks WHERE priority = 3 OR status = 'completed';");
 
-    Table* table = find_table_by_name("tasks");
+    Table *table = find_table_by_name("tasks");
     assert_int_eq(0, alist_length(&table->rows), "Table should be empty after deletes");
 
     log_msg(LOG_INFO, "DELETE with AND/OR tests passed");
@@ -335,7 +333,7 @@ void test_insert_empty_values(void) {
     exec("CREATE TABLE empty_test (id INT, name STRING);");
     exec("INSERT INTO empty_test VALUES (1, 'First');");
 
-    Table* table = find_table_by_name("empty_test");
+    Table *table = find_table_by_name("empty_test");
     assert_int_eq(1, alist_length(&table->rows), "Table should have 1 row");
 
     log_msg(LOG_INFO, "INSERT with empty table tests passed");
@@ -350,7 +348,7 @@ void test_insert_string_with_spaces(void) {
     exec("INSERT INTO phrases VALUES (1, 'Hello World');");
     exec("INSERT INTO phrases VALUES (2, 'Test Phrase With Multiple Words');");
 
-    Table* table = find_table_by_name("phrases");
+    Table *table = find_table_by_name("phrases");
     assert_int_eq(2, alist_length(&table->rows), "Table should have 2 rows");
 
     log_msg(LOG_INFO, "INSERT with spaces in strings tests passed");
@@ -368,7 +366,7 @@ void test_update_same_value(void) {
 
     exec("UPDATE same_value SET status = 'active' WHERE status = 'active';");
 
-    Table* table = find_table_by_name("same_value");
+    Table *table = find_table_by_name("same_value");
     assert_int_eq(3, alist_length(&table->rows), "Table should still have 3 rows");
 
     log_msg(LOG_INFO, "UPDATE with same value tests passed");
@@ -385,35 +383,37 @@ void test_insert_select_new_types(void) {
     exec("INSERT INTO new_types VALUES (2, FALSE, 150.50, 'Product B');");
     exec("INSERT INTO new_types VALUES (3, TRUE, 75.00, NULL);");
 
-    Table* table = find_table_by_name("new_types");
+    Table *table = find_table_by_name("new_types");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
-    Row* row = (Row*)alist_get(&table->rows, 0);
+    Row *row = (Row *)alist_get(&table->rows, 0);
     assert_ptr_not_null(row, "First row should exist");
     assert_int_eq(4, alist_length(row), "Row should have 4 values");
 
-    Value* val = (Value*)alist_get(row, 0);
+    Value *val = (Value *)alist_get(row, 0);
     assert_int_eq(TYPE_INT, val->type, "First value should be INT");
     assert_int_eq(1, val->int_val, "id should be 1");
 
-    val = (Value*)alist_get(row, 1);
+    val = (Value *)alist_get(row, 1);
     assert_int_eq(TYPE_BOOLEAN, val->type, "Second value should be BOOLEAN");
     assert_true(val->bool_val, "active should be TRUE");
 
-    val = (Value*)alist_get(row, 2);
-    assert_true(val->type == TYPE_FLOAT || val->type == TYPE_DECIMAL, "Third value should be numeric");
+    val = (Value *)alist_get(row, 2);
+    assert_true(val->type == TYPE_FLOAT || val->type == TYPE_DECIMAL,
+                "Third value should be numeric");
 
-    val = (Value*)alist_get(row, 3);
+    val = (Value *)alist_get(row, 3);
     assert_int_eq(TYPE_STRING, val->type, "Fourth value should be STRING");
-    assert_true(val->char_val && strcmp(val->char_val, "Product A") == 0, "description should be 'Product A'");
+    assert_true(val->char_val && strcmp(val->char_val, "Product A") == 0,
+                "description should be 'Product A'");
 
-    row = (Row*)alist_get(&table->rows, 1);
-    val = (Value*)alist_get(row, 1);
+    row = (Row *)alist_get(&table->rows, 1);
+    val = (Value *)alist_get(row, 1);
     assert_int_eq(TYPE_BOOLEAN, val->type, "Second row active should be BOOLEAN");
     assert_true(!val->bool_val, "active should be FALSE");
 
-    row = (Row*)alist_get(&table->rows, 2);
-    val = (Value*)alist_get(row, 3);
+    row = (Row *)alist_get(&table->rows, 2);
+    val = (Value *)alist_get(row, 3);
     assert_int_eq(TYPE_NULL, val->type, "Third row description should be NULL");
 
     log_msg(LOG_INFO, "INSERT and SELECT with new data types tests passed");

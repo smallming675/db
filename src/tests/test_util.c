@@ -8,21 +8,24 @@
 
 #include "arraylist.h"
 #include "db.h"
+#include "executor.h"
 #include "logger.h"
+#include "utils.h"
 #include "table.h"
 
 extern ArrayList tables;
 extern ArrayList indexes;
 
-static void free_index(void* ptr) {
-    Index* index = (Index*)ptr;
-    if (!index) return;
+static void free_index(void *ptr) {
+    Index *index = (Index *)ptr;
+    if (!index)
+        return;
 
     if (index->buckets) {
         for (int i = 0; i < index->bucket_count; i++) {
-            IndexEntry* entry = index->buckets[i];
+            IndexEntry *entry = index->buckets[i];
             while (entry) {
-                IndexEntry* next = entry->next;
+                IndexEntry *next = entry->next;
                 if (entry->key.type == TYPE_STRING && entry->key.char_val) {
                     free(entry->key.char_val);
                 }
@@ -47,11 +50,11 @@ void reset_database(void) {
     alist_init(&indexes, sizeof(Index), free_index);
 }
 
-bool exec(const char* sql) {
-    Token* tokens = tokenize(sql);
+bool exec(const char *sql) {
+    Token *tokens = tokenize(sql);
     assert_true(tokens, "Tokenization failed for: %s", sql);
 
-    ASTNode* ast = parse(tokens);
+    ASTNode *ast = parse(tokens);
     assert_true(ast, "Parsing failed for: %s", sql);
 
     exec_ast(ast);
@@ -61,13 +64,34 @@ bool exec(const char* sql) {
     return true;
 }
 
-Table* find_table_by_name(const char* name) { return find_table(name); }
-
-static void format_message(char* buffer, size_t size, const char* format, va_list args) {
-    vsnprintf(buffer, size, format, args);
+Table *find_table_by_name(const char *name) {
+    return find_table(name);
 }
 
-void assert_true(bool condition, const char* format, ...) {
+QueryResult *exec_query(const char *sql) {
+    static QueryResult *last_result = NULL;
+
+    if (last_result) {
+        free_query_result(last_result);
+        g_last_result = NULL;
+    }
+
+    assert_true(exec(sql), "Query execution failed: %s", sql);
+
+    last_result = g_last_result;
+    if (!last_result) {
+        static QueryResult empty = {0};
+        last_result = &empty;
+    }
+
+    return last_result;
+}
+
+static void format_message(char *buffer, size_t size, const char *format, va_list args) {
+    string_format_v(buffer, size, format, args);
+}
+
+void assert_true(bool condition, const char *format, ...) {
     if (!condition) {
         char message[512];
         va_list args;
@@ -79,9 +103,11 @@ void assert_true(bool condition, const char* format, ...) {
     }
 }
 
-void assert_false(bool condition, const char* format, ...) { assert_true(!condition, format); }
+void assert_false(bool condition, const char *format, ...) {
+    assert_true(!condition, format);
+}
 
-void assert_int_eq(int expected, int actual, const char* format, ...) {
+void assert_int_eq(int expected, int actual, const char *format, ...) {
     if (expected != actual) {
         char message[512];
         va_list args;
@@ -93,8 +119,9 @@ void assert_int_eq(int expected, int actual, const char* format, ...) {
     }
 }
 
-void assert_str_eq(const char* expected, const char* actual, const char* format, ...) {
-    if (expected == NULL && actual == NULL) return;
+void assert_str_eq(const char *expected, const char *actual, const char *format, ...) {
+    if (expected == NULL && actual == NULL)
+        return;
     if (expected == NULL || actual == NULL) {
         char message[512];
         va_list args;
@@ -103,6 +130,7 @@ void assert_str_eq(const char* expected, const char* actual, const char* format,
         va_end(args);
         log_msg(LOG_ERROR, "ASSERTION FAILED: %s (one string is NULL)", message);
         assert(false);
+        return;
     }
     if (strcmp(expected, actual) != 0) {
         char message[512];
@@ -116,7 +144,7 @@ void assert_str_eq(const char* expected, const char* actual, const char* format,
     }
 }
 
-void assert_ptr_not_null(void* ptr, const char* format, ...) {
+void assert_ptr_not_null(void *ptr, const char *format, ...) {
     if (ptr == NULL) {
         char message[512];
         va_list args;
@@ -128,7 +156,7 @@ void assert_ptr_not_null(void* ptr, const char* format, ...) {
     }
 }
 
-void assert_ptr_null(void* ptr, const char* format, ...) {
+void assert_ptr_null(void *ptr, const char *format, ...) {
     if (ptr != NULL) {
         char message[512];
         va_list args;
@@ -140,10 +168,12 @@ void assert_ptr_null(void* ptr, const char* format, ...) {
     }
 }
 
-void assert_float_eq(double expected, double actual, double epsilon, const char* format, ...) {
-    if (expected == actual) return;
+void assert_float_eq(double expected, double actual, double epsilon, const char *format, ...) {
+    if (expected == actual)
+        return;
     double diff = expected - actual;
-    if (diff < 0) diff = -diff;
+    if (diff < 0)
+        diff = -diff;
     if (diff > epsilon) {
         char message[512];
         va_list args;

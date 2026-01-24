@@ -7,6 +7,8 @@
 #include <time.h>
 #include <ctype.h>
 
+#include "utils.h"
+
 LogLevel g_log_level = LOG_INFO;
 
 #define COLOR_RESET "\x1b[0m"
@@ -16,16 +18,18 @@ LogLevel g_log_level = LOG_INFO;
 #define COLOR_BLUE "\x1b[34m"
 #define COLOR_BOLD "\x1b[1m"
 
-static const char* lvl_str(LogLevel lvl) {
+static const char *lvl_str(LogLevel lvl) {
     switch (lvl) {
-        case LOG_INFO:
-            return COLOR_GREEN "INFO" COLOR_RESET;
-        case LOG_WARN:
-            return COLOR_YELLOW "WARN" COLOR_RESET;
-        case LOG_ERROR:
-            return COLOR_RED "ERROR" COLOR_RESET;
-        case LOG_DEBUG:
-            return COLOR_BLUE "DEBUG" COLOR_RESET;
+    case LOG_INFO:
+        return COLOR_GREEN "INFO" COLOR_RESET;
+    case LOG_WARN:
+        return COLOR_YELLOW "WARN" COLOR_RESET;
+    case LOG_ERROR:
+        return COLOR_RED "ERROR" COLOR_RESET;
+    case LOG_DEBUG:
+        return COLOR_BLUE "DEBUG" COLOR_RESET;
+    case LOG_NONE:
+        return "";
     }
     return "";
 }
@@ -45,9 +49,8 @@ static int levenshtein_distance(const char *s1, const char *s2) {
     for (int i = 1; i <= len1; i++) {
         for (int j = 1; j <= len2; j++) {
             int cost = (tolower(s1[i - 1]) == tolower(s2[j - 1])) ? 0 : 1;
-            matrix[i][j] = (matrix[i - 1][j] + 1 < matrix[i][j - 1] + 1)
-                               ? matrix[i - 1][j] + 1
-                               : matrix[i][j - 1] + 1;
+            matrix[i][j] = (matrix[i - 1][j] + 1 < matrix[i][j - 1] + 1) ? matrix[i - 1][j] + 1
+                                                                         : matrix[i][j - 1] + 1;
             matrix[i][j] = (matrix[i][j] < matrix[i - 1][j - 1] + cost)
                                ? matrix[i][j]
                                : matrix[i - 1][j - 1] + cost;
@@ -81,8 +84,8 @@ static int get_similarity_score(const char *input, const char *candidate) {
     return similarity;
 }
 
-void suggest_similar(const char *input, const char *candidates[], int candidate_count,
-                    char *output, int output_size) {
+void suggest_similar(const char *input, const char *candidates[], int candidate_count, char *output,
+                     int output_size) {
     int best_score = 0;
     int best_idx = -1;
     int threshold = 40;
@@ -96,15 +99,17 @@ void suggest_similar(const char *input, const char *candidates[], int candidate_
     }
 
     if (best_idx >= 0 && best_score >= threshold) {
-        snprintf(output, output_size, "Did you mean '%s'?", candidates[best_idx]);
+        string_format(output, output_size, "Did you mean '%s'?", candidates[best_idx]);
     } else {
         output[0] = '\0';
     }
 }
 
-void set_log_level(LogLevel level) { g_log_level = level; }
+void set_log_level(LogLevel level) {
+    g_log_level = level;
+}
 
-LogLevel log_level_from_str(const char* level_str) {
+LogLevel log_level_from_str(const char *level_str) {
     if (strcmp(level_str, "DEBUG") == 0) {
         return LOG_DEBUG;
     } else if (strcmp(level_str, "INFO") == 0) {
@@ -117,25 +122,32 @@ LogLevel log_level_from_str(const char* level_str) {
         return LOG_INFO;
 }
 
-void log_msg(LogLevel level, const char* fmt, ...) {
-    if (level < g_log_level) return;
+void log_msg(LogLevel level, const char *fmt, ...) {
+    if (level < g_log_level)
+        return;
     time_t t = time(NULL);
     struct tm tm = *localtime(&t);
     char ts[64];
     strftime(ts, sizeof(ts), "%F %T", &tm);
 
-    fprintf(stderr, "[%s] %s: ", ts, lvl_str(level));
+    char header[96];
+    string_format(header, sizeof(header), "[%s] %s: ", ts, lvl_str(level));
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    char message[1024];
+    string_format_v(message, sizeof(message), fmt, ap);
     va_end(ap);
-    fputs(COLOR_RESET "\n", stderr);
+    char line[1200];
+    string_format(line, sizeof(line), "%s%s%s\n", header, message, COLOR_RESET);
+    fputs(line, stderr);
 }
 
-void show_prominent_error(const char* fmt, ...) {
+void show_prominent_error(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    vprintf(fmt, ap);
+    char message[1024];
+    string_format_v(message, sizeof(message), fmt, ap);
     va_end(ap);
-    printf(COLOR_RESET "\n");
+    fputs(message, stdout);
+    fputs(COLOR_RESET "\n", stdout);
 }

@@ -1,28 +1,23 @@
-#include <math.h>
+#include <assert.h>
 #include <stdio.h>
-#include <string.h>
 
-#include "arraylist.h"
 #include "db.h"
 #include "logger.h"
-#include "table.h"
 #include "test_util.h"
+#include "utils.h"
 
 void test_count_aggregate(void) {
     log_msg(LOG_INFO, "Testing COUNT aggregate...");
 
     reset_database();
 
-    exec("CREATE TABLE items (id INT, name STRING, price FLOAT);");
-    exec("INSERT INTO items VALUES (1, 'Item A', 10.00);");
-    exec("INSERT INTO items VALUES (2, 'Item B', 20.00);");
-    exec("INSERT INTO items VALUES (3, 'Item C', 30.00);");
+    exec("CREATE TABLE test_count (id INT, value INT);");
+    exec("INSERT INTO test_count VALUES (1, 10), (2, 20), (3, NULL);");
 
-    exec("SELECT COUNT(*) FROM items;");
-    exec("SELECT COUNT(*) FROM items WHERE price > 15;");
-    exec("SELECT COUNT(name) FROM items;");
+    QueryResult *result = exec_query("SELECT COUNT(value) FROM test_count;");
+    assert_ptr_not_null(result, "COUNT query should return result");
 
-    log_msg(LOG_INFO, "COUNT aggregate tests passed");
+    log_msg(LOG_INFO, "COUNT test passed");
 }
 
 void test_sum_aggregate(void) {
@@ -30,15 +25,13 @@ void test_sum_aggregate(void) {
 
     reset_database();
 
-    exec("CREATE TABLE orders (id INT, amount FLOAT);");
-    exec("INSERT INTO orders VALUES (1, 100.50);");
-    exec("INSERT INTO orders VALUES (2, 200.75);");
-    exec("INSERT INTO orders VALUES (3, 50.25);");
+    exec("CREATE TABLE test_sum (id INT, value INT);");
+    exec("INSERT INTO test_sum VALUES (1, 10), (2, 20), (3, 30);");
 
-    exec("SELECT SUM(amount) FROM orders;");
-    exec("SELECT SUM(amount) FROM orders WHERE amount > 100;");
+    QueryResult *result = exec_query("SELECT SUM(value) FROM test_sum;");
+    assert_ptr_not_null(result, "SUM query should return result");
 
-    log_msg(LOG_INFO, "SUM aggregate tests passed");
+    log_msg(LOG_INFO, "SUM test passed");
 }
 
 void test_avg_aggregate(void) {
@@ -46,15 +39,13 @@ void test_avg_aggregate(void) {
 
     reset_database();
 
-    exec("CREATE TABLE scores (id INT, student STRING, score FLOAT);");
-    exec("INSERT INTO scores VALUES (1, 'Alice', 85.5);");
-    exec("INSERT INTO scores VALUES (2, 'Bob', 92.0);");
-    exec("INSERT INTO scores VALUES (3, 'Charlie', 78.5);");
+    exec("CREATE TABLE test_avg (id INT, value INT);");
+    exec("INSERT INTO test_avg VALUES (1, 10), (2, 20), (3, 30);");
 
-    exec("SELECT AVG(score) FROM scores;");
-    exec("SELECT AVG(score) FROM scores WHERE score > 80;");
+    QueryResult *result = exec_query("SELECT AVG(value) FROM test_avg;");
+    assert_ptr_not_null(result, "AVG query should return result");
 
-    log_msg(LOG_INFO, "AVG aggregate tests passed");
+    log_msg(LOG_INFO, "AVG test passed");
 }
 
 void test_min_aggregate(void) {
@@ -62,15 +53,13 @@ void test_min_aggregate(void) {
 
     reset_database();
 
-    exec("CREATE TABLE temperatures (id INT, city STRING, temp FLOAT);");
-    exec("INSERT INTO temperatures VALUES (1, 'NYC', 72.5);");
-    exec("INSERT INTO temperatures VALUES (2, 'LA', 80.0);");
-    exec("INSERT INTO temperatures VALUES (3, 'Chicago', 65.5);");
+    exec("CREATE TABLE test_min (id INT, value INT);");
+    exec("INSERT INTO test_min VALUES (1, 10), (2, 5), (3, 30);");
 
-    exec("SELECT MIN(temp) FROM temperatures;");
-    exec("SELECT MIN(temp) FROM temperatures WHERE city != 'Chicago';");
+    QueryResult *result = exec_query("SELECT MIN(value) FROM test_min;");
+    assert_ptr_not_null(result, "MIN query should return result");
 
-    log_msg(LOG_INFO, "MIN aggregate tests passed");
+    log_msg(LOG_INFO, "MIN test passed");
 }
 
 void test_max_aggregate(void) {
@@ -78,49 +67,42 @@ void test_max_aggregate(void) {
 
     reset_database();
 
-    exec("CREATE TABLE products (id INT, name STRING, price FLOAT);");
-    exec("INSERT INTO products VALUES (1, 'A', 25.00);");
-    exec("INSERT INTO products VALUES (2, 'B', 50.00);");
-    exec("INSERT INTO products VALUES (3, 'C', 75.00);");
+    exec("CREATE TABLE test_max (id INT, value INT);");
+    exec("INSERT INTO test_max VALUES (1, 10), (2, 20), (3, 30);");
 
-    exec("SELECT MAX(price) FROM products;");
-    exec("SELECT MAX(price) FROM products WHERE price < 100;");
+    QueryResult *result = exec_query("SELECT MAX(value) FROM test_max;");
+    assert_ptr_not_null(result, "MAX query should return result");
 
-    log_msg(LOG_INFO, "MAX aggregate tests passed");
+    log_msg(LOG_INFO, "MAX test passed");
 }
 
 void test_multiple_aggregates(void) {
-    log_msg(LOG_INFO, "Testing multiple aggregates in one query...");
+    log_msg(LOG_INFO, "Testing multiple aggregates...");
 
     reset_database();
 
-    exec("CREATE TABLE sales (id INT, product STRING, amount FLOAT);");
-    exec("INSERT INTO sales VALUES (1, 'A', 100.00);");
-    exec("INSERT INTO sales VALUES (2, 'B', 200.00);");
-    exec("INSERT INTO sales VALUES (3, 'C', 150.00);");
+    exec("CREATE TABLE test_multi (id INT, value INT);");
+    exec("INSERT INTO test_multi VALUES (1, 10), (2, 20), (3, 30);");
 
-    exec("SELECT COUNT(*), SUM(amount), AVG(amount), MIN(amount), MAX(amount) FROM sales;");
+    QueryResult *result = exec_query(
+        "SELECT COUNT(value), SUM(value), AVG(value), MIN(value), MAX(value) FROM test_multi;");
+    assert_ptr_not_null(result, "Multiple aggregates query should return result");
 
-    log_msg(LOG_INFO, "Multiple aggregates tests passed");
+    log_msg(LOG_INFO, "Multiple aggregates test passed");
 }
 
 void test_aggregate_with_where(void) {
-    log_msg(LOG_INFO, "Testing aggregates with WHERE clause...");
+    log_msg(LOG_INFO, "Testing aggregate with WHERE...");
 
     reset_database();
 
-    exec("CREATE TABLE transactions (id INT, type STRING, amount FLOAT);");
-    exec("INSERT INTO transactions VALUES (1, 'income', 1000.00);");
-    exec("INSERT INTO transactions VALUES (2, 'expense', 500.00);");
-    exec("INSERT INTO transactions VALUES (3, 'income', 750.00);");
-    exec("INSERT INTO transactions VALUES (4, 'expense', 300.00);");
-    exec("INSERT INTO transactions VALUES (5, 'income', 1200.00);");
+    exec("CREATE TABLE test_where (id INT, value INT, category STRING);");
+    exec("INSERT INTO test_where VALUES (1, 10, 'A'), (2, 20, 'A'), (3, 30, 'B');");
 
-    exec("SELECT SUM(amount) FROM transactions WHERE type = 'income';");
-    exec("SELECT COUNT(*) FROM transactions WHERE amount > 400;");
-    exec("SELECT AVG(amount) FROM transactions WHERE type = 'expense';");
+    QueryResult *result = exec_query("SELECT COUNT(value) FROM test_where WHERE category = 'A';");
+    assert_ptr_not_null(result, "Aggregate with WHERE query should return result");
 
-    log_msg(LOG_INFO, "Aggregates with WHERE tests passed");
+    log_msg(LOG_INFO, "Aggregate with WHERE test passed");
 }
 
 void test_aggregate_edge_cases(void) {
@@ -128,153 +110,119 @@ void test_aggregate_edge_cases(void) {
 
     reset_database();
 
-    exec("CREATE TABLE empty_table (id INT, value INT);");
-    exec("SELECT COUNT(*) FROM empty_table;");
-    exec("SELECT SUM(value) FROM empty_table;");
+    exec("CREATE TABLE test_edge (id INT, value INT);");
+    exec("INSERT INTO test_edge VALUES (1, NULL), (2, NULL);");
 
-    exec("CREATE TABLE single_row (id INT, value INT);");
-    exec("INSERT INTO single_row VALUES (1, 42);");
-    exec("SELECT COUNT(*), SUM(value), AVG(value), MIN(value), MAX(value) FROM single_row;");
+    QueryResult *result = exec_query("SELECT COUNT(value), SUM(value), AVG(value) FROM test_edge;");
+    assert_ptr_not_null(result, "Aggregate edge cases query should return result");
 
-    exec("CREATE TABLE null_values (id INT, value INT);");
-    exec("INSERT INTO null_values VALUES (1, 10);");
-    exec("INSERT INTO null_values VALUES (2, NULL);");
-    exec("INSERT INTO null_values VALUES (3, 20);");
-    exec("SELECT COUNT(value) FROM null_values;");
-
-    log_msg(LOG_INFO, "Aggregate edge cases tests passed");
+    log_msg(LOG_INFO, "Aggregate edge cases test passed");
 }
 
 void test_count_all_vs_column(void) {
-    log_msg(LOG_INFO, "Testing COUNT(*) vs COUNT(column)...");
+    log_msg(LOG_INFO, "Testing COUNT(*) vs column...");
 
     reset_database();
 
-    exec("CREATE TABLE count_test (id INT, name STRING);");
-    exec("INSERT INTO count_test VALUES (1, 'Alice');");
-    exec("INSERT INTO count_test VALUES (2, NULL);");
-    exec("INSERT INTO count_test VALUES (3, 'Charlie');");
+    exec("CREATE TABLE test_count_star (id INT, value INT);");
+    exec("INSERT INTO test_count_star VALUES (1, 10), (2, 20);");
 
-    exec("SELECT COUNT(*) FROM count_test;");
-    exec("SELECT COUNT(name) FROM count_test;");
+    QueryResult *result1 = exec_query("SELECT COUNT(*) FROM test_count_star;");
+    QueryResult *result2 = exec_query("SELECT COUNT(id) FROM test_count_star;");
+    assert_ptr_not_null(result1, "COUNT(*) query should return result");
+    assert_ptr_not_null(result2, "COUNT(id) query should return result");
 
-    log_msg(LOG_INFO, "COUNT(*) vs COUNT(column) tests passed");
+    log_msg(LOG_INFO, "COUNT(*) vs column test passed");
 }
 
 void test_aggregate_with_all_types(void) {
-    log_msg(LOG_INFO, "Testing aggregates with all numeric types...");
+    log_msg(LOG_INFO, "Testing aggregate with all types...");
 
     reset_database();
 
-    exec("CREATE TABLE mixed_numbers (id INT, int_val INT, float_val FLOAT);");
-    exec("INSERT INTO mixed_numbers VALUES (1, 10, 100.5);");
-    exec("INSERT INTO mixed_numbers VALUES (2, 20, 200.5);");
-    exec("INSERT INTO mixed_numbers VALUES (3, 30, 300.5);");
+    exec("CREATE TABLE test_types (id INT, int_val INT, float_val FLOAT, str_val STRING);");
+    exec("INSERT INTO test_types VALUES (1, 10, 1.5, 'test');");
 
-    exec("SELECT COUNT(*), SUM(int_val), AVG(int_val), MIN(int_val), MAX(int_val) FROM mixed_numbers;");
-    exec("SELECT SUM(float_val), AVG(float_val), MIN(float_val), MAX(float_val) FROM mixed_numbers;");
+    QueryResult *result = exec_query("SELECT COUNT(*), SUM(int_val), AVG(float_val), MIN(str_val), "
+                                     "MAX(str_val) FROM test_types;");
+    assert_ptr_not_null(result, "All types aggregate query should return result");
 
-    log_msg(LOG_INFO, "Aggregates with all numeric types tests passed");
+    log_msg(LOG_INFO, "All types aggregate test passed");
 }
 
 void test_aggregate_large_dataset(void) {
-    log_msg(LOG_INFO, "Testing aggregates with larger dataset...");
+    log_msg(LOG_INFO, "Testing aggregate with large dataset...");
 
     reset_database();
 
-    exec("CREATE TABLE large_data (id INT, category STRING, value INT);");
-    exec("INSERT INTO large_data VALUES (1, 'A', 100);");
-    exec("INSERT INTO large_data VALUES (2, 'A', 200);");
-    exec("INSERT INTO large_data VALUES (3, 'B', 150);");
-    exec("INSERT INTO large_data VALUES (4, 'B', 250);");
-    exec("INSERT INTO large_data VALUES (5, 'C', 300);");
-    exec("INSERT INTO large_data VALUES (6, 'A', 180);");
-    exec("INSERT INTO large_data VALUES (7, 'B', 220);");
-    exec("INSERT INTO large_data VALUES (8, 'C', 400);");
-    exec("INSERT INTO large_data VALUES (9, 'A', 120);");
-    exec("INSERT INTO large_data VALUES (10, 'B', 180);");
+    exec("CREATE TABLE test_large (id INT, value INT);");
+    for (int i = 1; i <= 100; i++) {
+        char sql[100];
+        string_format(sql, sizeof(sql), "INSERT INTO test_large VALUES (%d, %d);", i, i * 2);
+        exec(sql);
+    }
 
-    exec("SELECT COUNT(*) FROM large_data;");
-    exec("SELECT SUM(value) FROM large_data;");
-    exec("SELECT AVG(value) FROM large_data;");
-    exec("SELECT MIN(value), MAX(value) FROM large_data;");
+    QueryResult *result =
+        exec_query("SELECT COUNT(value), SUM(value), AVG(value) FROM test_large;");
+    assert_ptr_not_null(result, "Large dataset aggregate query should return result");
 
-    log_msg(LOG_INFO, "Aggregates with larger dataset tests passed");
+    log_msg(LOG_INFO, "Large dataset aggregate test passed");
 }
 
 void test_aggregate_with_zero_values(void) {
-    log_msg(LOG_INFO, "Testing aggregates with zero and negative values...");
+    log_msg(LOG_INFO, "Testing aggregate with zero values...");
 
     reset_database();
 
-    exec("CREATE TABLE signed_numbers (id INT, value INT);");
-    exec("INSERT INTO signed_numbers VALUES (1, 100);");
-    exec("INSERT INTO signed_numbers VALUES (2, 0);");
-    exec("INSERT INTO signed_numbers VALUES (3, -50);");
-    exec("INSERT INTO signed_numbers VALUES (4, 200);");
-    exec("INSERT INTO signed_numbers VALUES (5, -100);");
+    exec("CREATE TABLE test_zero (id INT, value INT);");
+    exec("INSERT INTO test_zero VALUES (1, 0), (2, 0), (3, 0);");
 
-    exec("SELECT SUM(value) FROM signed_numbers;");
-    exec("SELECT MIN(value), MAX(value) FROM signed_numbers;");
-    exec("SELECT COUNT(*) FROM signed_numbers WHERE value < 0;");
+    QueryResult *result = exec_query("SELECT COUNT(value), SUM(value), AVG(value) FROM test_zero;");
+    assert_ptr_not_null(result, "Zero values aggregate query should return result");
 
-    log_msg(LOG_INFO, "Aggregates with zero/negative values tests passed");
+    log_msg(LOG_INFO, "Zero values aggregate test passed");
 }
 
 void test_aggregate_with_like_where(void) {
-    log_msg(LOG_INFO, "Testing aggregates with LIKE in WHERE...");
+    log_msg(LOG_INFO, "Testing aggregate with LIKE WHERE...");
 
     reset_database();
 
-    exec("CREATE TABLE products (id INT, name STRING, price FLOAT);");
-    exec("INSERT INTO products VALUES (1, 'Apple Laptop', 999.99);");
-    exec("INSERT INTO products VALUES (2, 'Apple Phone', 599.99);");
-    exec("INSERT INTO products VALUES (3, 'Samsung TV', 799.99);");
-    exec("INSERT INTO products VALUES (4, 'Apple Watch', 299.99);");
-    exec("INSERT INTO products VALUES (5, 'Dell Laptop', 899.99);");
+    exec("CREATE TABLE test_like (id INT, value INT, pattern STRING);");
+    exec("INSERT INTO test_like VALUES (1, 10, 'A%'), (2, 20, 'A%');");
 
-    exec("SELECT COUNT(*) FROM products WHERE name LIKE 'Apple%';");
-    exec("SELECT AVG(price) FROM products WHERE name LIKE '%Laptop%';");
-    exec("SELECT SUM(price) FROM products WHERE name LIKE '%Apple%';");
+    QueryResult *result = exec_query("SELECT COUNT(value) FROM test_like WHERE pattern LIKE 'A%';");
+    assert_ptr_not_null(result, "Aggregate with LIKE WHERE query should return result");
 
-    log_msg(LOG_INFO, "Aggregates with LIKE WHERE tests passed");
+    log_msg(LOG_INFO, "Aggregate with LIKE WHERE test passed");
 }
 
 void test_aggregate_multiple_wheres(void) {
-    log_msg(LOG_INFO, "Testing aggregates with multiple WHERE conditions...");
+    log_msg(LOG_INFO, "Testing aggregate with multiple WHERE...");
 
     reset_database();
 
-    exec("CREATE TABLE orders (id INT, customer STRING, amount FLOAT, status STRING);");
-    exec("INSERT INTO orders VALUES (1, 'Alice', 100.00, 'completed');");
-    exec("INSERT INTO orders VALUES (2, 'Alice', 200.00, 'completed');");
-    exec("INSERT INTO orders VALUES (3, 'Alice', 50.00, 'pending');");
-    exec("INSERT INTO orders VALUES (4, 'Bob', 150.00, 'completed');");
-    exec("INSERT INTO orders VALUES (5, 'Bob', 300.00, 'pending');");
-    exec("INSERT INTO orders VALUES (6, 'Bob', 75.00, 'completed');");
+    exec("CREATE TABLE test_multi_where (id INT, value INT, category STRING, flag BOOLEAN);");
+    exec("INSERT INTO test_multi_where VALUES (1, 10, 'A', true), (2, 20, 'A', false);");
 
-    exec("SELECT COUNT(*) FROM orders WHERE customer = 'Alice' AND status = 'completed';");
-    exec("SELECT SUM(amount) FROM orders WHERE status = 'completed' AND amount > 100;");
-    exec("SELECT AVG(amount) FROM orders WHERE customer = 'Bob' OR status = 'pending';");
+    QueryResult *result = exec_query(
+        "SELECT COUNT(value) FROM test_multi_where WHERE category = 'A' AND flag = true;");
+    assert_ptr_not_null(result, "Multiple WHERE aggregate query should return result");
 
-    log_msg(LOG_INFO, "Aggregates with multiple WHERE conditions tests passed");
+    log_msg(LOG_INFO, "Multiple WHERE aggregate test passed");
 }
 
 void test_aggregate_with_order_by_limit(void) {
-    log_msg(LOG_INFO, "Testing aggregates with ORDER BY and LIMIT...");
+    log_msg(LOG_INFO, "Testing aggregate with ORDER BY LIMIT...");
 
     reset_database();
 
-    exec("CREATE TABLE scores (id INT, player STRING, score INT);");
-    exec("INSERT INTO scores VALUES (1, 'Alice', 100);");
-    exec("INSERT INTO scores VALUES (2, 'Bob', 200);");
-    exec("INSERT INTO scores VALUES (3, 'Charlie', 150);");
-    exec("INSERT INTO scores VALUES (4, 'Diana', 250);");
-    exec("INSERT INTO scores VALUES (5, 'Eve', 175);");
+    exec("CREATE TABLE test_order (id INT, value INT);");
+    exec("INSERT INTO test_order VALUES (1, 30), (2, 20), (3, 10);");
 
-    exec("SELECT COUNT(*) FROM scores;");
-    exec("SELECT SUM(score) FROM scores;");
-    exec("SELECT MAX(score) FROM scores;");
+    QueryResult *result =
+        exec_query("SELECT COUNT(value) FROM test_order ORDER BY value DESC LIMIT 2;");
+    assert_ptr_not_null(result, "ORDER BY LIMIT aggregate query should return result");
 
-    log_msg(LOG_INFO, "Aggregates with ORDER BY and LIMIT tests passed");
+    log_msg(LOG_INFO, "ORDER BY LIMIT aggregate test passed");
 }

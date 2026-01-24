@@ -3,9 +3,44 @@
 #include <string.h>
 
 #include "db.h"
-#include "executor_internal.h"
+#include "executor.h"
+#include "utils.h"
+#include "table.h"
+#include "values.h"
 
-static Value eval_string_func_upper(const Value* arg1) {
+int compare_values(const Value *a, const Value *b) {
+    if (is_null(a) && is_null(b))
+        return 0;
+    if (is_null(a))
+        return -1;
+    if (is_null(b))
+        return 1;
+
+    if (a->type != b->type) {
+        return (int)a->type - (int)b->type;
+    }
+
+    switch (a->type) {
+    case TYPE_INT:
+        if (a->int_val < b->int_val)
+            return -1;
+        if (a->int_val > b->int_val)
+            return 1;
+        return 0;
+    case TYPE_FLOAT:
+        if (a->float_val < b->float_val)
+            return -1;
+        if (a->float_val > b->float_val)
+            return 1;
+        return 0;
+    case TYPE_STRING:
+        return strcmp(a->char_val, b->char_val);
+    default:
+        return 0;
+    }
+}
+
+static Value eval_string_func_upper(const Value *arg1) {
     Value result = {0};
     result.type = TYPE_STRING;
     if (arg1->type == TYPE_STRING && arg1->char_val) {
@@ -20,7 +55,32 @@ static Value eval_string_func_upper(const Value* arg1) {
     return result;
 }
 
-static Value eval_string_func_lower(const Value* arg1) {
+Value scalar_coalesce(Value *args, int arg_count) {
+    for (int i = 0; i < arg_count; i++) {
+        if (!is_null(&args[i])) {
+            return copy_value(&args[i]);
+        }
+    }
+    Value null_result = {.type = TYPE_NULL};
+    return null_result;
+}
+
+Value scalar_nullif(Value *arg1, Value *arg2) {
+    if (compare_values(arg1, arg2) == 0) {
+        Value null_result = {.type = TYPE_NULL};
+        return null_result;
+    }
+    return copy_value(arg1);
+}
+
+Value scalar_case(Value *condition, Value *then_val, Value *else_val) {
+    if (!is_null(condition) && condition->type == TYPE_BOOLEAN && condition->bool_val) {
+        return copy_value(then_val);
+    }
+    return copy_value(else_val);
+}
+
+static Value eval_string_func_lower(const Value *arg1) {
     Value result = {0};
     result.type = TYPE_STRING;
     if (arg1->type == TYPE_STRING && arg1->char_val) {
@@ -35,14 +95,14 @@ static Value eval_string_func_lower(const Value* arg1) {
     return result;
 }
 
-static Value eval_string_func_len(const Value* arg1) {
+static Value eval_string_func_len(const Value *arg1) {
     Value result = {0};
     result.type = TYPE_INT;
     result.int_val = (arg1->type == TYPE_STRING && arg1->char_val) ? strlen(arg1->char_val) : 0;
     return result;
 }
 
-static Value eval_string_func_mid(const Value* arg1, const Value* arg2, const Value* arg3) {
+static Value eval_string_func_mid(const Value *arg1, const Value *arg2, const Value *arg3) {
     Value result = {0};
     result.type = TYPE_STRING;
     if (arg1->type == TYPE_STRING && arg1->char_val) {
@@ -52,7 +112,9 @@ static Value eval_string_func_mid(const Value* arg1, const Value* arg2, const Va
         if (start < src_len) {
             int copy_len = (start + len > src_len) ? (src_len - start) : len;
             result.char_val = malloc(copy_len + 1);
-            memcpy(result.char_val, arg1->char_val + start, copy_len);
+            if (copy_len > 0) {
+                memory_copy(result.char_val, arg1->char_val + start, (size_t)copy_len);
+            }
             result.char_val[copy_len] = '\0';
         } else {
             result.char_val = malloc(1);
@@ -65,7 +127,7 @@ static Value eval_string_func_mid(const Value* arg1, const Value* arg2, const Va
     return result;
 }
 
-static Value eval_string_func_left(const Value* arg1, const Value* arg2) {
+static Value eval_string_func_left(const Value *arg1, const Value *arg2) {
     Value result = {0};
     result.type = TYPE_STRING;
     if (arg1->type == TYPE_STRING && arg1->char_val) {
@@ -73,7 +135,9 @@ static Value eval_string_func_left(const Value* arg1, const Value* arg2) {
         int src_len = strlen(arg1->char_val);
         int copy_len = len < src_len ? len : src_len;
         result.char_val = malloc(copy_len + 1);
-        memcpy(result.char_val, arg1->char_val, copy_len);
+        if (copy_len > 0) {
+            memory_copy(result.char_val, arg1->char_val, (size_t)copy_len);
+        }
         result.char_val[copy_len] = '\0';
     } else {
         result.char_val = malloc(1);
@@ -82,17 +146,18 @@ static Value eval_string_func_left(const Value* arg1, const Value* arg2) {
     return result;
 }
 
-static Value eval_string_func_right(const Value* arg1, const Value* arg2) {
+static Value eval_string_func_right(const Value *arg1, const Value *arg2) {
     Value result = {0};
     result.type = TYPE_STRING;
     if (arg1->type == TYPE_STRING && arg1->char_val) {
         int len = arg2->type == TYPE_INT ? arg2->int_val : 0;
         int src_len = strlen(arg1->char_val);
         int start = src_len - len;
-        if (start < 0) start = 0;
+        if (start < 0)
+            start = 0;
         int copy_len = src_len - start;
         result.char_val = malloc(copy_len + 1);
-        memcpy(result.char_val, arg1->char_val + start, copy_len);
+        memory_copy(result.char_val, arg1->char_val + start, copy_len);
         result.char_val[copy_len] = '\0';
     } else {
         result.char_val = malloc(1);
@@ -101,29 +166,30 @@ static Value eval_string_func_right(const Value* arg1, const Value* arg2) {
     return result;
 }
 
-static Value eval_string_func_concat(const Expr* expr, const Row* row, const TableDef* schema) {
+static Value eval_string_func_concat(const Expr *expr, const Row *row, const TableDef *schema) {
     Value result = {0};
     result.type = TYPE_STRING;
     size_t total_len = 0;
-    
+
     for (int i = 0; i < expr->scalar.arg_count; i++) {
         Value arg = eval_select_expression(expr->scalar.args[i], row, schema);
         if (arg.type == TYPE_STRING && arg.char_val) {
             total_len += strlen(arg.char_val);
         }
     }
-    result.char_val = malloc(total_len + 1);
+    size_t capacity = total_len + 1;
+    result.char_val = malloc(capacity);
     result.char_val[0] = '\0';
     for (int i = 0; i < expr->scalar.arg_count; i++) {
         Value arg = eval_select_expression(expr->scalar.args[i], row, schema);
         if (arg.type == TYPE_STRING && arg.char_val) {
-            strcat(result.char_val, arg.char_val);
+            string_append(result.char_val, capacity, arg.char_val);
         }
     }
     return result;
 }
 
-static Value eval_string_function(const Expr* expr, const Row* row, const TableDef* schema) {
+static Value eval_string_function(const Expr *expr, const Row *row, const TableDef *schema) {
     Value arg1 = {0};
     if (expr->scalar.arg_count > 0) {
         arg1 = eval_select_expression(expr->scalar.args[0], row, schema);
@@ -135,40 +201,45 @@ static Value eval_string_function(const Expr* expr, const Row* row, const TableD
     }
 
     switch (expr->scalar.func_type) {
-        case FUNC_UPPER: return eval_string_func_upper(&arg1);
-        case FUNC_LOWER: return eval_string_func_lower(&arg1);
-        case FUNC_LEN:   return eval_string_func_len(&arg1);
-        case FUNC_MID: {
-            Value arg2 = {0}, arg3 = {0};
-            if (expr->scalar.arg_count >= 3) {
-                arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
-                arg3 = eval_select_expression(expr->scalar.args[2], row, schema);
-            }
-            return eval_string_func_mid(&arg1, &arg2, &arg3);
+    case FUNC_UPPER:
+        return eval_string_func_upper(&arg1);
+    case FUNC_LOWER:
+        return eval_string_func_lower(&arg1);
+    case FUNC_LEN:
+        return eval_string_func_len(&arg1);
+    case FUNC_MID: {
+        Value arg2 = {0}, arg3 = {0};
+        if (expr->scalar.arg_count >= 3) {
+            arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
+            arg3 = eval_select_expression(expr->scalar.args[2], row, schema);
         }
-        case FUNC_LEFT: {
-            Value arg2 = {0};
-            if (expr->scalar.arg_count >= 2) {
-                arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
-            }
-            return eval_string_func_left(&arg1, &arg2);
+        return eval_string_func_mid(&arg1, &arg2, &arg3);
+    }
+    case FUNC_LEFT: {
+        Value arg2 = {0};
+        if (expr->scalar.arg_count >= 2) {
+            arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
         }
-        case FUNC_RIGHT: {
-            Value arg2 = {0};
-            if (expr->scalar.arg_count >= 2) {
-                arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
-            }
-            return eval_string_func_right(&arg1, &arg2);
+        return eval_string_func_left(&arg1, &arg2);
+    }
+    case FUNC_RIGHT: {
+        Value arg2 = {0};
+        if (expr->scalar.arg_count >= 2) {
+            arg2 = eval_select_expression(expr->scalar.args[1], row, schema);
         }
-        case FUNC_CONCAT: return eval_string_func_concat(expr, row, schema);
-        default: break;
+        return eval_string_func_right(&arg1, &arg2);
+    }
+    case FUNC_CONCAT:
+        return eval_string_func_concat(expr, row, schema);
+    default:
+        break;
     }
     Value err = {0};
     err.type = TYPE_ERROR;
     return err;
 }
 
-static Value eval_math_func_abs(const Value* arg) {
+static Value eval_math_func_abs(const Value *arg) {
     Value result = {0};
     if (arg->type == TYPE_INT) {
         result.type = TYPE_INT;
@@ -180,7 +251,7 @@ static Value eval_math_func_abs(const Value* arg) {
     return result;
 }
 
-static Value eval_math_func_sqrt(const Value* arg) {
+static Value eval_math_func_sqrt(const Value *arg) {
     Value result = {0};
     if (arg->type == TYPE_INT || arg->type == TYPE_FLOAT) {
         result.type = TYPE_FLOAT;
@@ -189,7 +260,7 @@ static Value eval_math_func_sqrt(const Value* arg) {
     return result;
 }
 
-static Value eval_math_func_mod(const Value* arg) {
+static Value eval_math_func_mod(const Value *arg) {
     Value result = {0};
     if (arg->type == TYPE_INT) {
         result.type = TYPE_INT;
@@ -198,7 +269,7 @@ static Value eval_math_func_mod(const Value* arg) {
     return result;
 }
 
-static Value eval_math_func_pow(const Value* arg) {
+static Value eval_math_func_pow(const Value *arg) {
     Value result = {0};
     if (arg->type == TYPE_INT || arg->type == TYPE_FLOAT) {
         result.type = TYPE_FLOAT;
@@ -207,7 +278,7 @@ static Value eval_math_func_pow(const Value* arg) {
     return result;
 }
 
-static Value eval_math_func_round(const Value* arg) {
+static Value eval_math_func_round(const Value *arg) {
     Value result = {0};
     if (arg->type == TYPE_FLOAT) {
         result.type = TYPE_FLOAT;
@@ -216,7 +287,7 @@ static Value eval_math_func_round(const Value* arg) {
     return result;
 }
 
-static Value eval_math_func_floor(const Value* arg) {
+static Value eval_math_func_floor(const Value *arg) {
     Value result = {0};
     if (arg->type == TYPE_FLOAT) {
         result.type = TYPE_FLOAT;
@@ -225,7 +296,7 @@ static Value eval_math_func_floor(const Value* arg) {
     return result;
 }
 
-static Value eval_math_func_ceil(const Value* arg) {
+static Value eval_math_func_ceil(const Value *arg) {
     Value result = {0};
     if (arg->type == TYPE_FLOAT) {
         result.type = TYPE_FLOAT;
@@ -234,7 +305,7 @@ static Value eval_math_func_ceil(const Value* arg) {
     return result;
 }
 
-static Value eval_math_function(const Expr* expr, const Row* row, const TableDef* schema) {
+static Value eval_math_function(const Expr *expr, const Row *row, const TableDef *schema) {
     Value arg = {0};
     if (expr->scalar.arg_count > 0) {
         arg = eval_select_expression(expr->scalar.args[0], row, schema);
@@ -246,21 +317,29 @@ static Value eval_math_function(const Expr* expr, const Row* row, const TableDef
     }
 
     switch (expr->scalar.func_type) {
-        case FUNC_ABS:   return eval_math_func_abs(&arg);
-        case FUNC_SQRT:  return eval_math_func_sqrt(&arg);
-        case FUNC_MOD:   return eval_math_func_mod(&arg);
-        case FUNC_POW:   return eval_math_func_pow(&arg);
-        case FUNC_ROUND: return eval_math_func_round(&arg);
-        case FUNC_FLOOR: return eval_math_func_floor(&arg);
-        case FUNC_CEIL:  return eval_math_func_ceil(&arg);
-        default: break;
+    case FUNC_ABS:
+        return eval_math_func_abs(&arg);
+    case FUNC_SQRT:
+        return eval_math_func_sqrt(&arg);
+    case FUNC_MOD:
+        return eval_math_func_mod(&arg);
+    case FUNC_POW:
+        return eval_math_func_pow(&arg);
+    case FUNC_ROUND:
+        return eval_math_func_round(&arg);
+    case FUNC_FLOOR:
+        return eval_math_func_floor(&arg);
+    case FUNC_CEIL:
+        return eval_math_func_ceil(&arg);
+    default:
+        break;
     }
     Value err = {0};
     err.type = TYPE_ERROR;
     return err;
 }
 
-Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema) {
+Value eval_scalar_function(const Expr *expr, const Row *row, const TableDef *schema) {
     Value result = eval_math_function(expr, row, schema);
     if (result.type != TYPE_ERROR) {
         return result;

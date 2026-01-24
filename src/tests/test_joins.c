@@ -129,9 +129,8 @@ void test_self_join(void) {
     exec("INSERT INTO employees VALUES (3, 'CFO', 1);");
     exec("INSERT INTO employees VALUES (4, 'Dev1', 2);");
 
-    exec(
-        "SELECT e.name AS employee, m.name AS manager FROM employees e JOIN employees m ON "
-        "e.manager_id = m.id;");
+    exec("SELECT e.name AS employee, m.name AS manager FROM employees e JOIN employees m ON "
+         "e.manager_id = m.id;");
 
     log_msg(LOG_INFO, "Self JOIN tests passed");
 }
@@ -155,9 +154,8 @@ void test_three_table_join(void) {
     exec("INSERT INTO sales VALUES (2, 2, 5);");
     exec("INSERT INTO sales VALUES (3, 3, 8);");
 
-    exec(
-        "SELECT a.name, b.title, s.quantity FROM authors a JOIN books b ON a.author_id = "
-        "b.author_id JOIN sales s ON b.book_id = s.book_id;");
+    exec("SELECT a.name, b.title, s.quantity FROM authors a JOIN books b ON a.author_id = "
+         "b.author_id JOIN sales s ON b.book_id = s.book_id;");
 
     log_msg(LOG_INFO, "Three table JOIN tests passed");
 }

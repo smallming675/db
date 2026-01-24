@@ -1,11 +1,4 @@
-#include <stdio.h>
-#include <string.h>
-
-#include "arraylist.h"
-#include "db.h"
 #include "logger.h"
-#include "table.h"
-#include "test_util.h"
 
 void test_create_table(void);
 void test_drop_table(void);
@@ -73,6 +66,8 @@ void test_aggregate_with_like_where(void);
 void test_aggregate_multiple_wheres(void);
 void test_aggregate_with_order_by_limit(void);
 
+void test_string_copy(void);
+
 void test_string_functions(void);
 void test_numeric_functions(void);
 void test_concat_function(void);
@@ -115,6 +110,13 @@ void test_exists_subquery(void);
 void test_nested_subquery(void);
 void test_subquery_with_join(void);
 void test_scalar_subquery(void);
+void test_btree_basic(void);
+void test_query_stats_basic(void);
+void test_aggregation_improved(void);
+void test_new_features_simple(void);
+void test_btree_basic(void);
+void test_query_stats_basic(void);
+void test_aggregation_improved(void);
 
 int main(void) {
     set_log_level(LOG_DEBUG);
@@ -195,12 +197,16 @@ int main(void) {
     test_aggregate_with_order_by_limit();
     log_msg(LOG_INFO, "All aggregate tests passed successfully!");
     log_msg(LOG_INFO, "========================================");
+    log_msg(LOG_INFO, "\n=== Utility Tests ===");
+    test_string_copy();
+    log_msg(LOG_INFO, "Utility tests passed!");
+    log_msg(LOG_INFO, "========================================");
     log_msg(LOG_INFO, "\n=== Index Tests ===");
     test_create_index();
     test_index_filter_equality();
     log_msg(LOG_INFO, "Index tests passed!");
     log_msg(LOG_INFO, "========================================");
-    log_msg(LOG_INFO, "All tests passed successfully!");
+    log_msg(LOG_INFO, "All tests passed!");
     log_msg(LOG_INFO, "========================================");
 
     return 0;

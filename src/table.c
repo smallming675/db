@@ -7,30 +7,33 @@
 #include "arraylist.h"
 #include "db.h"
 #include "logger.h"
+#include "utils.h"
 #include "values.h"
 
 ArrayList tables;
 ArrayList indexes;
-static void free_index(void* ptr);
+static void free_index(void *ptr);
 
-void copy_row(Row* dst, const Row* src, int column_count) {
-    if (!dst || !src) return;
+void copy_row(Row *dst, const Row *src, int column_count) {
+    if (!dst || !src)
+        return;
 
     int src_count = alist_length(src);
     int count = column_count > 0 && column_count < src_count ? column_count : src_count;
 
     for (int i = 0; i < count; i++) {
-        Value* src_val = (Value*)alist_get(src, i);
-        Value* dst_val = (Value*)alist_append(dst);
+        Value *src_val = (Value *)alist_get(src, i);
+        Value *dst_val = (Value *)alist_append(dst);
         if (src_val && dst_val) {
             *dst_val = copy_value(src_val);
         }
     }
 }
 
-void free_table_internal(void* ptr) {
-    Table* table = (Table*)ptr;
-    if (!table) return;
+void free_table_internal(void *ptr) {
+    Table *table = (Table *)ptr;
+    if (!table)
+        return;
 
     if (table->rows.data != NULL) {
         alist_destroy(&table->rows);
@@ -40,8 +43,9 @@ void free_table_internal(void* ptr) {
     }
 }
 
-void free_table(Table* table) {
-    if (!table) return;
+void free_table(Table *table) {
+    if (!table)
+        return;
     if (table->rows.data != NULL) {
         alist_destroy(&table->rows);
     }
@@ -50,25 +54,26 @@ void free_table(Table* table) {
     }
 }
 
-Value copy_value(const Value* src) {
+Value copy_value(const Value *src) {
     Value dst = *src;
     if (src->type == TYPE_STRING && src->char_val != NULL) {
         dst.char_val = malloc(strlen(src->char_val) + 1);
         if (dst.char_val) {
-            strcpy(dst.char_val, src->char_val);
+            string_copy(dst.char_val, strlen(src->char_val) + 1, src->char_val);
         }
     } else if (src->type == TYPE_BLOB && src->blob_val.data != NULL && src->blob_val.length > 0) {
         dst.blob_val.data = malloc(src->blob_val.length);
         if (dst.blob_val.data) {
-            memcpy(dst.blob_val.data, src->blob_val.data, src->blob_val.length);
+            memory_copy(dst.blob_val.data, src->blob_val.data, src->blob_val.length);
         }
     }
     return dst;
 }
 
-void free_value(void* ptr) {
-    Value* val = (Value*)ptr;
-    if (!val) return;
+void free_value(void *ptr) {
+    Value *val = (Value *)ptr;
+    if (!val)
+        return;
     if (val->type == TYPE_STRING && val->char_val) {
         free(val->char_val);
         val->char_val = NULL;
@@ -80,9 +85,9 @@ void free_value(void* ptr) {
     val->type = TYPE_NULL;
 }
 
-Table* find_table(const char* name) {
+Table *find_table(const char *name) {
     for (int i = 0; i < alist_length(&tables); i++) {
-        Table* table = (Table*)alist_get(&tables, i);
+        Table *table = (Table *)alist_get(&tables, i);
         if (table && strcmp(table->name, name) == 0) {
             return table;
         }
@@ -90,9 +95,9 @@ Table* find_table(const char* name) {
     return NULL;
 }
 
-uint8_t find_table_id_by_name(const char* name) {
+uint8_t find_table_id_by_name(const char *name) {
     for (int i = 0; i < alist_length(&tables); i++) {
-        Table* table = (Table*)alist_get(&tables, i);
+        Table *table = (Table *)alist_get(&tables, i);
         if (table && strcmp(table->name, name) == 0) {
             return table->table_id;
         }
@@ -100,12 +105,14 @@ uint8_t find_table_id_by_name(const char* name) {
     return 0;
 }
 
-Table* get_table(const char* name) { return find_table(name); }
+Table *get_table(const char *name) {
+    return find_table(name);
+}
 
-Table* get_table_by_id(uint8_t table_id) {
+Table *get_table_by_id(uint8_t table_id) {
     int count = alist_length(&tables);
     for (int i = 0; i < count; i++) {
-        Table* table = (Table*)alist_get(&tables, i);
+        Table *table = (Table *)alist_get(&tables, i);
         if (table && table->table_id == table_id) {
             return table;
         }
@@ -113,35 +120,39 @@ Table* get_table_by_id(uint8_t table_id) {
     return NULL;
 }
 
-bool value_equals(const Value* a, const Value* b) {
-    if (a->type != b->type) return false;
-    if (is_null(a) && is_null(b)) return true;
-    if (is_null(a) || is_null(b)) return false;
+bool value_equals(const Value *a, const Value *b) {
+    if (a->type != b->type)
+        return false;
+    if (is_null(a) && is_null(b))
+        return true;
+    if (is_null(a) || is_null(b))
+        return false;
 
     switch (a->type) {
-        case TYPE_INT:
-            return a->int_val == b->int_val;
-        case TYPE_FLOAT:
-            return a->float_val == b->float_val;
-        case TYPE_BOOLEAN:
-            return a->bool_val == b->bool_val;
-        case TYPE_DECIMAL:
-            return a->decimal_val.value == b->decimal_val.value &&
-                   a->decimal_val.precision == b->decimal_val.precision &&
-                   a->decimal_val.scale == b->decimal_val.scale;
-        case TYPE_BLOB:
-            return a->blob_val.length == b->blob_val.length &&
-                   memcmp(a->blob_val.data, b->blob_val.data, a->blob_val.length) == 0;
-        case TYPE_STRING:
-            return strcmp(a->char_val, b->char_val) == 0;
-        default:
-            return false;
+    case TYPE_INT:
+        return a->int_val == b->int_val;
+    case TYPE_FLOAT:
+        return a->float_val == b->float_val;
+    case TYPE_BOOLEAN:
+        return a->bool_val == b->bool_val;
+    case TYPE_DECIMAL:
+        return a->decimal_val.value == b->decimal_val.value &&
+               a->decimal_val.precision == b->decimal_val.precision &&
+               a->decimal_val.scale == b->decimal_val.scale;
+    case TYPE_BLOB:
+        return a->blob_val.length == b->blob_val.length &&
+               memcmp(a->blob_val.data, b->blob_val.data, a->blob_val.length) == 0;
+    case TYPE_STRING:
+        return strcmp(a->char_val, b->char_val) == 0;
+    default:
+        return false;
     }
 }
 
-bool check_not_null_constraint(Table* table, int col_idx, Value* val) {
-    ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
-    if (!col) return false;
+bool check_not_null_constraint(Table *table, int col_idx, Value *val) {
+    ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, col_idx);
+    if (!col)
+        return false;
     if (!(col->flags & COL_FLAG_NULLABLE) && is_null(val)) {
         log_msg(LOG_ERROR, "Constraint violation: NOT NULL on column '%s'", col->name);
         return false;
@@ -149,16 +160,18 @@ bool check_not_null_constraint(Table* table, int col_idx, Value* val) {
     return true;
 }
 
-bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_row_idx) {
-    if (is_null(val)) return true;
+bool check_unique_constraint(Table *table, int col_idx, Value *val, int exclude_row_idx) {
+    if (is_null(val))
+        return true;
 
     int row_count = alist_length(&table->rows);
     for (int i = 0; i < row_count; i++) {
-        if (i == exclude_row_idx) continue;
-        Row* row = (Row*)alist_get(&table->rows, i);
-        ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
+        if (i == exclude_row_idx)
+            continue;
+        Row *row = (Row *)alist_get(&table->rows, i);
+        ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, col_idx);
         if (row && col) {
-            Value* row_val = (Value*)alist_get(row, col_idx);
+            Value *row_val = (Value *)alist_get(row, col_idx);
             if (row_val && value_equals(row_val, val)) {
                 log_msg(LOG_ERROR,
                         "Constraint violation: UNIQUE on column '%s' (duplicate value '%s')",
@@ -170,13 +183,16 @@ bool check_unique_constraint(Table* table, int col_idx, Value* val, int exclude_
     return true;
 }
 
-bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
-    ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, col_idx);
-    if (!col) return false;
-    if (!(col->flags & COL_FLAG_FOREIGN_KEY) || col->references_table[0] == '\0') return true;
-    if (is_null(val)) return true;
+bool check_foreign_key_constraint(Table *table, int col_idx, Value *val) {
+    ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, col_idx);
+    if (!col)
+        return false;
+    if (!(col->flags & COL_FLAG_FOREIGN_KEY) || col->references_table[0] == '\0')
+        return true;
+    if (is_null(val))
+        return true;
 
-    Table* ref_table = find_table(col->references_table);
+    Table *ref_table = find_table(col->references_table);
     if (!ref_table) {
         log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY references non-existent table '%s'",
                 col->references_table);
@@ -187,7 +203,7 @@ bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
     if (col->references_column[0] != '\0') {
         int ref_col_count = alist_length(&ref_table->schema.columns);
         for (int i = 0; i < ref_col_count; i++) {
-            ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, i);
+            ColumnDef *ref_col = (ColumnDef *)alist_get(&ref_table->schema.columns, i);
             if (ref_col && strcmp(ref_col->name, col->references_column) == 0) {
                 ref_col_idx = i;
                 break;
@@ -207,17 +223,17 @@ bool check_foreign_key_constraint(Table* table, int col_idx, Value* val) {
 
     int ref_row_count = alist_length(&ref_table->rows);
     for (int i = 0; i < ref_row_count; i++) {
-        Row* ref_row = (Row*)alist_get(&ref_table->rows, i);
-        ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, ref_col_idx);
+        Row *ref_row = (Row *)alist_get(&ref_table->rows, i);
+        ColumnDef *ref_col = (ColumnDef *)alist_get(&ref_table->schema.columns, ref_col_idx);
         if (ref_row && ref_col) {
-            Value* ref_val = (Value*)alist_get(ref_row, ref_col_idx);
+            Value *ref_val = (Value *)alist_get(ref_row, ref_col_idx);
             if (ref_val && value_equals(ref_val, val)) {
                 return true;
             }
         }
     }
 
-    ColumnDef* ref_col = (ColumnDef*)alist_get(&ref_table->schema.columns, ref_col_idx);
+    ColumnDef *ref_col = (ColumnDef *)alist_get(&ref_table->schema.columns, ref_col_idx);
     log_msg(LOG_ERROR,
             "Constraint violation: FOREIGN KEY on column '%s' (value '%s' not found in %s.%s)",
             col->name, repr(val), col->references_table, ref_col ? ref_col->name : "unknown");
@@ -236,43 +252,45 @@ void init_tables(void) {
 /* Hash function for Values - used by index implementation.
  * Converts a Value to a hash code for bucket indexing.
  * Returns a value between 0 and bucket_count-1. */
-int hash_value(const Value* value, int bucket_count) {
-    if (!value || bucket_count <= 0) return 0;
+int hash_value(const Value *value, int bucket_count) {
+    if (!value || bucket_count <= 0)
+        return 0;
 
     unsigned long hash = 0;
     switch (value->type) {
-        case TYPE_INT:
-            hash = (unsigned long)(value->int_val);
-            break;
-        case TYPE_FLOAT:
-            hash = (unsigned long)(value->float_val * 1000.0);
-            break;
-        case TYPE_BOOLEAN:
-            hash = (unsigned long)(value->bool_val);
-            break;
-        case TYPE_STRING:
-            if (value->char_val) {
-                const char* p = value->char_val;
-                while (*p) {
-                    hash = hash * 31 + *p++;
-                }
+    case TYPE_INT:
+        hash = (unsigned long)(value->int_val);
+        break;
+    case TYPE_FLOAT:
+        hash = (unsigned long)(value->float_val * 1000.0);
+        break;
+    case TYPE_BOOLEAN:
+        hash = (unsigned long)(value->bool_val);
+        break;
+    case TYPE_STRING:
+        if (value->char_val) {
+            const char *p = value->char_val;
+            while (*p) {
+                hash = hash * 31 + *p++;
             }
-            break;
-        case TYPE_TIME:
-            hash = value->time_val;
-            break;
-        case TYPE_DATE:
-            hash = value->date_val;
-            break;
-        default:
-            hash = 0;
+        }
+        break;
+    case TYPE_TIME:
+        hash = value->time_val;
+        break;
+    case TYPE_DATE:
+        hash = value->date_val;
+        break;
+    default:
+        hash = 0;
     }
 
     return (int)(hash % (unsigned long)bucket_count);
 }
 
-static void free_index_entry(IndexEntry* entry) {
-    if (!entry) return;
+static void free_index_entry(IndexEntry *entry) {
+    if (!entry)
+        return;
 
     if (entry->key.type == TYPE_STRING && entry->key.char_val) {
         free(entry->key.char_val);
@@ -281,9 +299,10 @@ static void free_index_entry(IndexEntry* entry) {
     free(entry);
 }
 
-static void free_index(void* ptr) {
-    Index* index = (Index*)ptr;
-    if (!index) return;
+static void free_index(void *ptr) {
+    Index *index = (Index *)ptr;
+    if (!index)
+        return;
 
     if (index->buckets) {
         for (int i = 0; i < index->bucket_count; i++) {
@@ -296,12 +315,13 @@ static void free_index(void* ptr) {
     log_msg(LOG_DEBUG, "free_index: Index '%s' freed", index->index_name);
 }
 
-Index* find_index(const char* index_name) {
-    if (!index_name) return NULL;
+Index *find_index(const char *index_name) {
+    if (!index_name)
+        return NULL;
 
     int index_count = alist_length(&indexes);
     for (int i = 0; i < index_count; i++) {
-        Index* idx = (Index*)alist_get(&indexes, i);
+        Index *idx = (Index *)alist_get(&indexes, i);
         if (idx && strcmp(idx->index_name, index_name) == 0) {
             return idx;
         }
@@ -310,80 +330,74 @@ Index* find_index(const char* index_name) {
 }
 
 /* Create an index on a table column */
-void index_table_column(const char* table_name, const char* column_name, const char* index_name) {
-    if (!table_name || !column_name) return;
-
-    Table* table = get_table(table_name);
-    if (!table) {
-        log_msg(LOG_ERROR, "index_table_column: Table '%s' not found", table_name);
-        return;
-    }
-
-    int column_idx = -1;
+static int find_column_index(Table *table, const char *column_name) {
     int column_count = alist_length(&table->schema.columns);
     for (int i = 0; i < column_count; i++) {
-        ColumnDef* col = (ColumnDef*)alist_get(&table->schema.columns, i);
+        ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, i);
         if (col && strcasecmp(col->name, column_name) == 0) {
-            column_idx = i;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void create_index_name(const char *table_name, const char *column_name,
+                              const char *index_name, char *result, size_t result_size) {
+    if (index_name && index_name[0] != '\0') {
+        string_copy(result, result_size, index_name);
+    } else {
+        string_format(result, result_size, "idx_%s_%s", table_name, column_name);
+    }
+}
+
+static void remove_existing_index(const char *idx_name) {
+    int index_count = alist_length(&indexes);
+    for (int i = 0; i < index_count; i++) {
+        Index *idx = (Index *)alist_get(&indexes, i);
+        if (idx && strcmp(idx->index_name, idx_name) == 0) {
+            alist_remove(&indexes, i);
             break;
         }
     }
+}
 
-    if (column_idx < 0) {
-        log_msg(LOG_ERROR, "index_table_column: Column '%s' not found in table '%s'", column_name,
-                table_name);
-        return;
-    }
-
-    char idx_name[MAX_TABLE_NAME_LEN];
-    if (index_name && index_name[0] != '\0') {
-        snprintf(idx_name, sizeof(idx_name), "%s", index_name);
-    } else {
-        snprintf(idx_name, sizeof(idx_name), "idx_%s_%s", table_name, column_name);
-    }
-
-    Index* existing = find_index(idx_name);
-    if (existing) {
-        log_msg(LOG_INFO, "index_table_column: Index '%s' already exists, rebuilding", idx_name);
-        int index_count = alist_length(&indexes);
-        for (int i = 0; i < index_count; i++) {
-            Index* idx = (Index*)alist_get(&indexes, i);
-            if (idx && strcmp(idx->index_name, idx_name) == 0) {
-                alist_remove(&indexes, i);
-                break;
-            }
-        }
-    }
-
-    Index* index = (Index*)malloc(sizeof(Index));
+static Index *create_and_init_index(const char *idx_name, const char *table_name,
+                                    const char *column_name) {
+    Index *index = (Index *)malloc(sizeof(Index));
     if (!index) {
         log_msg(LOG_ERROR, "index_table_column: Failed to allocate index");
-        return;
+        return NULL;
     }
 
-    memset(index, 0, sizeof(Index));
-    snprintf(index->index_name, sizeof(index->index_name), "%s", idx_name);
-    snprintf(index->table_name, sizeof(index->table_name), "%s", table_name);
-    snprintf(index->column_name, sizeof(index->column_name), "%s", column_name);
+    memory_clear(index, sizeof(Index));
+    string_copy(index->index_name, sizeof(index->index_name), idx_name);
+    string_copy(index->table_name, sizeof(index->table_name), table_name);
+    string_copy(index->column_name, sizeof(index->column_name), column_name);
     index->bucket_count = 64;
-    index->buckets = calloc(index->bucket_count, sizeof(IndexEntry*));
+    index->buckets = calloc(index->bucket_count, sizeof(IndexEntry *));
     index->entry_count = 0;
 
     if (!index->buckets) {
         log_msg(LOG_ERROR, "index_table_column: Failed to allocate index buckets");
         free(index);
-        return;
+        return NULL;
     }
 
+    return index;
+}
+
+static void populate_index_entries(Index *index, Table *table, int column_idx) {
     int row_count = alist_length(&table->rows);
     for (int i = 0; i < row_count; i++) {
-        Row* row = (Row*)alist_get(&table->rows, i);
-        if (!row || alist_length(row) <= column_idx) continue;
+        Row *row = (Row *)alist_get(&table->rows, i);
+        if (!row || alist_length(row) <= column_idx)
+            continue;
 
-        IndexEntry* entry = malloc(sizeof(IndexEntry));
-        if (!entry) continue;
+        IndexEntry *entry = malloc(sizeof(IndexEntry));
+        if (!entry)
+            continue;
 
-        Value* row_val = (Value*)alist_get(row, column_idx);
+        Value *row_val = (Value *)alist_get(row, column_idx);
         entry->key = copy_value(row_val);
         entry->row_index = i;
         entry->next = NULL;
@@ -393,28 +407,62 @@ void index_table_column(const char* table_name, const char* column_name, const c
         index->buckets[bucket] = entry;
         index->entry_count++;
     }
+}
 
-    Index* stored = (Index*)alist_append(&indexes);
+void index_table_column(const char *table_name, const char *column_name, const char *index_name) {
+    if (!table_name || !column_name)
+        return;
+
+    Table *table = get_table(table_name);
+    if (!table) {
+        log_msg(LOG_ERROR, "index_table_column: Table '%s' not found", table_name);
+        return;
+    }
+
+    int column_idx = find_column_index(table, column_name);
+    if (column_idx < 0) {
+        log_msg(LOG_ERROR, "index_table_column: Column '%s' not found in table '%s'", column_name,
+                table_name);
+        return;
+    }
+
+    char idx_name[MAX_TABLE_NAME_LEN];
+    create_index_name(table_name, column_name, index_name, idx_name, sizeof(idx_name));
+
+    Index *existing = find_index(idx_name);
+    if (existing) {
+        log_msg(LOG_INFO, "index_table_column: Index '%s' already exists, rebuilding", idx_name);
+        remove_existing_index(idx_name);
+    }
+
+    Index *index = create_and_init_index(idx_name, table_name, column_name);
+    if (!index)
+        return;
+
+    populate_index_entries(index, table, column_idx);
+
+    Index *stored = (Index *)alist_append(&indexes);
     stored->bucket_count = index->bucket_count;
     stored->buckets = index->buckets;
     stored->entry_count = index->entry_count;
-    strcpy(stored->index_name, index->index_name);
-    strcpy(stored->table_name, index->table_name);
-    strcpy(stored->column_name, index->column_name);
+    string_copy(stored->index_name, sizeof(stored->index_name), index->index_name);
+    string_copy(stored->table_name, sizeof(stored->table_name), index->table_name);
+    string_copy(stored->column_name, sizeof(stored->column_name), index->column_name);
 
     log_msg(LOG_INFO, "index_table_column: Created index '%s' on '%s.%s' with %d entries",
             index_name, table_name, column_name, index->entry_count);
-    
+
     free(index);
 }
 
 /* Drop an index by name */
-void drop_index_by_name(const char* index_name) {
-    if (!index_name) return;
+void drop_index_by_name(const char *index_name) {
+    if (!index_name)
+        return;
 
     int index_count = alist_length(&indexes);
     for (int i = 0; i < index_count; i++) {
-        Index* idx = (Index*)alist_get(&indexes, i);
+        Index *idx = (Index *)alist_get(&indexes, i);
         if (idx && strcmp(idx->index_name, index_name) == 0) {
             alist_remove(&indexes, i);
             log_msg(LOG_INFO, "drop_index_by_name: Index '%s' dropped", index_name);
@@ -425,12 +473,13 @@ void drop_index_by_name(const char* index_name) {
     log_msg(LOG_ERROR, "drop_index_by_name: Index '%s' not found", index_name);
 }
 
-Index* find_index_by_table_column(const char* table_name, const char* column_name) {
-    if (!table_name || !column_name) return NULL;
+Index *find_index_by_table_column(const char *table_name, const char *column_name) {
+    if (!table_name || !column_name)
+        return NULL;
 
     int index_count = alist_length(&indexes);
     for (int i = 0; i < index_count; i++) {
-        Index* idx = (Index*)alist_get(&indexes, i);
+        Index *idx = (Index *)alist_get(&indexes, i);
         if (idx && strcmp(idx->table_name, table_name) == 0 &&
             strcasecmp(idx->column_name, column_name) == 0) {
             return idx;
@@ -439,17 +488,19 @@ Index* find_index_by_table_column(const char* table_name, const char* column_nam
     return NULL;
 }
 
-void lookup_index_values(const Index* index, const Value* key, ArrayList* result) {
-    if (!index || !key || !result) return;
+void lookup_index_values(const Index *index, const Value *key, ArrayList *result) {
+    if (!index || !key || !result)
+        return;
 
     int bucket = hash_value(key, index->bucket_count);
     bucket = (bucket < 0) ? -bucket : bucket;
     bucket = bucket % index->bucket_count;
 
-    for (IndexEntry* entry = index->buckets[bucket]; entry != NULL; entry = entry->next) {
+    for (IndexEntry *entry = index->buckets[bucket]; entry != NULL; entry = entry->next) {
         if (value_equals(&entry->key, key)) {
-            int* row_idx = (int*)alist_append(result);
-            if (row_idx) *row_idx = entry->row_index;
+            int *row_idx = (int *)alist_append(result);
+            if (row_idx)
+                *row_idx = entry->row_index;
         }
     }
 }

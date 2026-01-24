@@ -4,17 +4,19 @@
 
 #include "arraylist.h"
 #include "db.h"
-#include "executor_internal.h"
+#include "executor.h"
 #include "logger.h"
 #include "table.h"
 #include "values.h"
 
-static bool is_indexable_equality(const Expr* expr, const char** col_name, Value* key_value) {
-    if (!expr || expr->type != EXPR_BINARY_OP) return false;
-    if (expr->binary.op != OP_EQUALS) return false;
+static bool is_indexable_equality(const Expr *expr, const char **col_name, Value *key_value) {
+    if (!expr || expr->type != EXPR_BINARY_OP)
+        return false;
+    if (expr->binary.op != OP_EQUALS)
+        return false;
 
-    Expr* left = expr->binary.left;
-    Expr* right = expr->binary.right;
+    Expr *left = expr->binary.left;
+    Expr *right = expr->binary.right;
 
     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
         *col_name = left->column_name;
@@ -29,14 +31,15 @@ static bool is_indexable_equality(const Expr* expr, const char** col_name, Value
     return false;
 }
 
-bool try_index_filter(Table* table, const Expr* where_expr, ArrayList* result) {
-    if (!table || !where_expr || !result) return false;
+bool try_index_filter(Table *table, const Expr *where_expr, ArrayList *result) {
+    if (!table || !where_expr || !result)
+        return false;
 
-    const char* col_name = NULL;
+    const char *col_name = NULL;
     Value key_value = {0};
 
     if (is_indexable_equality(where_expr, &col_name, &key_value)) {
-        Index* index = find_index_by_table_column(table->name, col_name);
+        Index *index = find_index_by_table_column(table->name, col_name);
         if (index) {
             log_msg(LOG_DEBUG, "try_index_filter: Using index on %s.%s", table->name, col_name);
             lookup_index_values(index, &key_value, result);
@@ -48,9 +51,9 @@ bool try_index_filter(Table* table, const Expr* where_expr, ArrayList* result) {
     return false;
 }
 
-bool eval_cmp_expression(const Expr* expr, const Row* row, const TableDef* schema) {
-    Expr* left = expr->binary.left;
-    Expr* right = expr->binary.right;
+bool eval_cmp_expression(const Expr *expr, const Row *row, const TableDef *schema) {
+    Expr *left = expr->binary.left;
+    Expr *right = expr->binary.right;
     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
         return eval_comparison(get_column_value(row, schema, left->column_name), right->value,
                                expr->binary.op);
@@ -66,50 +69,51 @@ bool eval_cmp_expression(const Expr* expr, const Row* row, const TableDef* schem
     return false;
 }
 
-bool eval_expression(const Expr* expr, const Row* row, const TableDef* schema) {
-    if (!expr) return true;
+bool eval_expression(const Expr *expr, const Row *row, const TableDef *schema) {
+    if (!expr)
+        return true;
 
     switch (expr->type) {
-        case EXPR_COLUMN: {
-            Value val = get_column_value(row, schema, expr->column_name);
-            return !is_null(&val);
-        }
-        case EXPR_VALUE:
-            return !is_null(&expr->value);
-        case EXPR_BINARY_OP: {
-            bool left_val = eval_expression(expr->binary.left, row, schema);
-            bool right_val = eval_expression(expr->binary.right, row, schema);
+    case EXPR_COLUMN: {
+        Value val = get_column_value(row, schema, expr->column_name);
+        return !is_null(&val);
+    }
+    case EXPR_VALUE:
+        return !is_null(&expr->value);
+    case EXPR_BINARY_OP: {
+        bool left_val = eval_expression(expr->binary.left, row, schema);
+        bool right_val = eval_expression(expr->binary.right, row, schema);
 
-            switch (expr->binary.op) {
-                case OP_AND:
-                    return left_val && right_val;
-                case OP_OR:
-                    return left_val || right_val;
-                case OP_EQUALS:
-                case OP_NOT_EQUALS:
-                case OP_LESS:
-                case OP_LESS_EQUAL:
-                case OP_GREATER:
-                case OP_GREATER_EQUAL:
-                case OP_LIKE:
-                    return eval_cmp_expression(expr, row, schema);
-                default:
-                    return false;
-            }
-        }
-        case EXPR_UNARY_OP: {
-            bool operand_val = eval_expression(expr->unary.operand, row, schema);
-            return expr->unary.op == OP_NOT ? !operand_val : false;
-        }
+        switch (expr->binary.op) {
+        case OP_AND:
+            return left_val && right_val;
+        case OP_OR:
+            return left_val || right_val;
+        case OP_EQUALS:
+        case OP_NOT_EQUALS:
+        case OP_LESS:
+        case OP_LESS_EQUAL:
+        case OP_GREATER:
+        case OP_GREATER_EQUAL:
+        case OP_LIKE:
+            return eval_cmp_expression(expr, row, schema);
         default:
             return false;
+        }
+    }
+    case EXPR_UNARY_OP: {
+        bool operand_val = eval_expression(expr->unary.operand, row, schema);
+        return expr->unary.op == OP_NOT ? !operand_val : false;
+    }
+    default:
+        return false;
     }
 }
 
-static bool eval_cmp_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
-                               const TableDef* right_schema, int left_col_count) {
-    Expr* left = expr->binary.left;
-    Expr* right = expr->binary.right;
+static bool eval_cmp_operation(const Expr *expr, const Row *row, const TableDef *left_schema,
+                               const TableDef *right_schema, int left_col_count) {
+    Expr *left = expr->binary.left;
+    Expr *right = expr->binary.right;
     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
         return eval_comparison(get_column_value_from_join(row, left_schema, right_schema,
                                                           left_col_count, left->column_name),
@@ -130,52 +134,53 @@ static bool eval_cmp_operation(const Expr* expr, const Row* row, const TableDef*
     }
     return false;
 }
-static bool eval_binary_operation(const Expr* expr, const Row* row, const TableDef* left_schema,
-                                  const TableDef* right_schema, int left_col_count) {
+static bool eval_binary_operation(const Expr *expr, const Row *row, const TableDef *left_schema,
+                                  const TableDef *right_schema, int left_col_count) {
     bool left_val =
         eval_expression_for_join(expr->binary.left, row, left_schema, right_schema, left_col_count);
     bool right_val = eval_expression_for_join(expr->binary.right, row, left_schema, right_schema,
                                               left_col_count);
 
     switch (expr->binary.op) {
-        case OP_AND:
-            return left_val && right_val;
-        case OP_OR:
-            return left_val || right_val;
-        case OP_EQUALS:
-        case OP_NOT_EQUALS:
-        case OP_LESS:
-        case OP_LESS_EQUAL:
-        case OP_GREATER:
-        case OP_GREATER_EQUAL:
-            return eval_cmp_operation(expr, row, left_schema, right_schema, left_col_count);
-        default:
-            return false;
+    case OP_AND:
+        return left_val && right_val;
+    case OP_OR:
+        return left_val || right_val;
+    case OP_EQUALS:
+    case OP_NOT_EQUALS:
+    case OP_LESS:
+    case OP_LESS_EQUAL:
+    case OP_GREATER:
+    case OP_GREATER_EQUAL:
+        return eval_cmp_operation(expr, row, left_schema, right_schema, left_col_count);
+    default:
+        return false;
     }
 }
 
-bool eval_expression_for_join(const Expr* expr, const Row* row, const TableDef* left_schema,
-                              const TableDef* right_schema, int left_col_count) {
-    if (!expr) return true;
+bool eval_expression_for_join(const Expr *expr, const Row *row, const TableDef *left_schema,
+                              const TableDef *right_schema, int left_col_count) {
+    if (!expr)
+        return true;
 
     switch (expr->type) {
-        case EXPR_COLUMN: {
-            Value val = get_column_value_from_join(row, left_schema, right_schema, left_col_count,
-                                                   expr->column_name);
-            return !is_null(&val);
-        }
-        case EXPR_VALUE:
-            return !is_null(&expr->value);
-        case EXPR_BINARY_OP:
-            return eval_binary_operation(expr, row, left_schema, right_schema, left_col_count);
+    case EXPR_COLUMN: {
+        Value val = get_column_value_from_join(row, left_schema, right_schema, left_col_count,
+                                               expr->column_name);
+        return !is_null(&val);
+    }
+    case EXPR_VALUE:
+        return !is_null(&expr->value);
+    case EXPR_BINARY_OP:
+        return eval_binary_operation(expr, row, left_schema, right_schema, left_col_count);
 
-        case EXPR_UNARY_OP: {
-            bool operand_val = eval_expression_for_join(expr->unary.operand, row, left_schema,
-                                                        right_schema, left_col_count);
-            return expr->unary.op == OP_NOT ? !operand_val : false;
-        }
-        default:
-            return false;
+    case EXPR_UNARY_OP: {
+        bool operand_val = eval_expression_for_join(expr->unary.operand, row, left_schema,
+                                                    right_schema, left_col_count);
+        return expr->unary.op == OP_NOT ? !operand_val : false;
+    }
+    default:
+        return false;
     }
 }
 
@@ -239,7 +244,7 @@ static Value eval_divide_op(Value left, Value right) {
 
 static Value eval_modulus_op(Value left, Value right) {
     Value result = {0};
-    if (left.type == TYPE_INT && right.type == TYPE_INT) {
+    if (left.type == TYPE_INT && right.type == TYPE_INT && right.int_val != 0) {
         result.type = TYPE_INT;
         result.int_val = left.int_val % right.int_val;
     }
@@ -250,23 +255,23 @@ static Value eval_arithmetic_op(OperatorType op, Value left, Value right) {
     Value result = {0};
 
     switch (op) {
-        case OP_ADD:
-            result = eval_add_op(left, right);
-            break;
-        case OP_SUBTRACT:
-            result = eval_subtract_op(left, right);
-            break;
-        case OP_MULTIPLY:
-            result = eval_multiply_op(left, right);
-            break;
-        case OP_DIVIDE:
-            result = eval_divide_op(left, right);
-            break;
-        case OP_MODULUS:
-            result = eval_modulus_op(left, right);
-            break;
-        default:
-            break;
+    case OP_ADD:
+        result = eval_add_op(left, right);
+        break;
+    case OP_SUBTRACT:
+        result = eval_subtract_op(left, right);
+        break;
+    case OP_MULTIPLY:
+        result = eval_multiply_op(left, right);
+        break;
+    case OP_DIVIDE:
+        result = eval_divide_op(left, right);
+        break;
+    case OP_MODULUS:
+        result = eval_modulus_op(left, right);
+        break;
+    default:
+        break;
     }
     return result;
 }
@@ -278,7 +283,7 @@ static Value eval_comparison_op(OperatorType op, Value left, Value right) {
     return result;
 }
 
-static Value eval_subquery(const Expr* expr) {
+static Value eval_subquery(const Expr *expr) {
     Value result = {0};
     result.type = TYPE_NULL;
 
@@ -289,19 +294,20 @@ static Value eval_subquery(const Expr* expr) {
 
     log_msg(LOG_DEBUG, "eval_subquery: executing subquery");
 
-    ASTNode* subquery_ast = expr->subquery.subquery;
+    ASTNode *subquery_ast = expr->subquery.subquery;
 
-    QueryResult* saved_result = get_last_query_result();
+    QueryResult *saved_result = get_last_query_result();
     set_last_query_result(NULL);
 
     exec_ast(subquery_ast);
 
-    QueryResult* last_result = get_last_query_result();
+    QueryResult *last_result = get_last_query_result();
     if (last_result && alist_length(&last_result->rows) > 0) {
         int col_count = last_result->col_count;
         if (col_count > 0) {
-            Value* val = (Value*)alist_get(&last_result->values, 0);
-            if (val) result = copy_string_value(val);
+            Value *val = (Value *)alist_get(&last_result->values, 0);
+            if (val)
+                result = copy_string_value(val);
         }
     }
 
@@ -311,38 +317,38 @@ static Value eval_subquery(const Expr* expr) {
     return result;
 }
 
-Value eval_scalar_function(const Expr* expr, const Row* row, const TableDef* schema);
+Value eval_scalar_function(const Expr *expr, const Row *row, const TableDef *schema);
 
-static Value eval_binary_op(Expr* expr, const Row* row, const TableDef* schema) {
+static Value eval_binary_op(Expr *expr, const Row *row, const TableDef *schema) {
     Value left = eval_select_expression(expr->binary.left, row, schema);
     Value right = eval_select_expression(expr->binary.right, row, schema);
 
     switch (expr->binary.op) {
-        case OP_ADD:
-        case OP_SUBTRACT:
-        case OP_MULTIPLY:
-        case OP_DIVIDE:
-        case OP_MODULUS:
-            return eval_arithmetic_op(expr->binary.op, left, right);
-        case OP_EQUALS:
-        case OP_NOT_EQUALS:
-        case OP_LESS:
-        case OP_LESS_EQUAL:
-        case OP_GREATER:
-        case OP_GREATER_EQUAL:
-        case OP_LIKE:
-        case OP_AND:
-        case OP_OR:
-            return eval_comparison_op(expr->binary.op, left, right);
-        default:
-            break;
+    case OP_ADD:
+    case OP_SUBTRACT:
+    case OP_MULTIPLY:
+    case OP_DIVIDE:
+    case OP_MODULUS:
+        return eval_arithmetic_op(expr->binary.op, left, right);
+    case OP_EQUALS:
+    case OP_NOT_EQUALS:
+    case OP_LESS:
+    case OP_LESS_EQUAL:
+    case OP_GREATER:
+    case OP_GREATER_EQUAL:
+    case OP_LIKE:
+    case OP_AND:
+    case OP_OR:
+        return eval_comparison_op(expr->binary.op, left, right);
+    default:
+        break;
     }
     Value result = {0};
     result.type = TYPE_NULL;
     return result;
 }
 
-static Value eval_unary_op(Expr* expr, const Row* row, const TableDef* schema) {
+static Value eval_unary_op(Expr *expr, const Row *row, const TableDef *schema) {
     Value result = {0};
     Value operand = eval_select_expression(expr->unary.operand, row, schema);
     if (expr->unary.op == OP_NOT) {
@@ -354,33 +360,34 @@ static Value eval_unary_op(Expr* expr, const Row* row, const TableDef* schema) {
     return result;
 }
 
-Value eval_select_expression(Expr* expr, const Row* row, const TableDef* schema) {
+Value eval_select_expression(Expr *expr, const Row *row, const TableDef *schema) {
     Value result = {0};
     result.type = TYPE_NULL;
 
-    if (!expr) return result;
+    if (!expr)
+        return result;
 
     switch (expr->type) {
-        case EXPR_COLUMN: {
-            Value col_val = get_column_value(row, schema, expr->column_name);
-            return copy_string_value(&col_val);
-        }
-        case EXPR_VALUE:
-            return copy_string_value(&expr->value);
-        case EXPR_BINARY_OP:
-            return eval_binary_op(expr, row, schema);
-        case EXPR_UNARY_OP:
-            return eval_unary_op(expr, row, schema);
-        case EXPR_AGGREGATE_FUNC:
-            log_msg(LOG_ERROR,
-                    "eval_select_expression: Cannot evaluate aggregate in non-aggregate context");
-            break;
-        case EXPR_SCALAR_FUNC:
-            return eval_scalar_function(expr, row, schema);
-        case EXPR_SUBQUERY:
-            return eval_subquery(expr);
-        default:
-            log_msg(LOG_WARN, "eval_select_expression: Unknown expression type %d", expr->type);
+    case EXPR_COLUMN: {
+        Value col_val = get_column_value(row, schema, expr->column_name);
+        return copy_string_value(&col_val);
+    }
+    case EXPR_VALUE:
+        return copy_string_value(&expr->value);
+    case EXPR_BINARY_OP:
+        return eval_binary_op(expr, row, schema);
+    case EXPR_UNARY_OP:
+        return eval_unary_op(expr, row, schema);
+    case EXPR_AGGREGATE_FUNC:
+        log_msg(LOG_ERROR,
+                "eval_select_expression: Cannot evaluate aggregate in non-aggregate context");
+        break;
+    case EXPR_SCALAR_FUNC:
+        return eval_scalar_function(expr, row, schema);
+    case EXPR_SUBQUERY:
+        return eval_subquery(expr);
+    default:
+        log_msg(LOG_WARN, "eval_select_expression: Unknown expression type %d", expr->type);
     }
     return result;
 }

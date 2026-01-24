@@ -12,7 +12,7 @@ typedef struct {
     bool is_numeric;
 } ColumnWidth;
 
-static int get_str_width(const char* str) {
+static int get_str_width(const char *str) {
     int len = 0;
     for (int i = 0; str && str[i]; i++) {
         unsigned char c = (unsigned char)str[i];
@@ -32,9 +32,9 @@ static int get_str_width(const char* str) {
     return len;
 }
 
-static void calculate_column_widths(QueryResult* result, ColumnWidth* col_widths, int col_count) {
+static void calculate_column_widths(QueryResult *result, ColumnWidth *col_widths, int col_count) {
     for (int j = 0; j < col_count; j++) {
-        char* name = *(char**)alist_get(&result->column_names, j);
+        char *name = *(char **)alist_get(&result->column_names, j);
         col_widths[j].width = get_str_width(name);
         col_widths[j].is_numeric = true;
     }
@@ -42,8 +42,8 @@ static void calculate_column_widths(QueryResult* result, ColumnWidth* col_widths
     int row_count = alist_length(&result->rows);
     for (int i = 0; i < row_count; i++) {
         for (int j = 0; j < col_count; j++) {
-            Value* val = (Value*)alist_get(&result->values, i * col_count + j);
-            const char* str = val->type == TYPE_NULL ? "NULL" : repr(val);
+            Value *val = (Value *)alist_get(&result->values, i * col_count + j);
+            const char *str = val->type == TYPE_NULL ? "NULL" : repr(val);
             int str_width = get_str_width(str);
             bool is_numeric = (val->type == TYPE_INT || val->type == TYPE_FLOAT);
             col_widths[j].is_numeric = col_widths[j].is_numeric && is_numeric;
@@ -55,7 +55,7 @@ static void calculate_column_widths(QueryResult* result, ColumnWidth* col_widths
     }
 }
 
-static void print_table_separator(ColumnWidth* col_widths, int col_count, int style) {
+static void print_table_separator(ColumnWidth *col_widths, int col_count, int style) {
     if (style == 0) {
         printf("+");
         for (int j = 0; j < col_count; j++) {
@@ -103,10 +103,10 @@ static void print_table_separator(ColumnWidth* col_widths, int col_count, int st
     }
 }
 
-static void print_table_header(QueryResult* result, ColumnWidth* col_widths, int col_count) {
+static void print_table_header(QueryResult *result, ColumnWidth *col_widths, int col_count) {
     printf("\u2502");
     for (int j = 0; j < col_count; j++) {
-        char* name = *(char**)alist_get(&result->column_names, j);
+        char *name = *(char **)alist_get(&result->column_names, j);
         int name_width = get_str_width(name);
         int padding = col_widths[j].width - name_width;
         int left_pad = padding / 2;
@@ -116,11 +116,12 @@ static void print_table_header(QueryResult* result, ColumnWidth* col_widths, int
     printf("\n");
 }
 
-static void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col_count, int row_idx) {
+static void print_row_data(QueryResult *result, ColumnWidth *col_widths, int col_count,
+                           int row_idx) {
     printf("\u2502");
     for (int j = 0; j < col_count; j++) {
-        Value* val = (Value*)alist_get(&result->values, row_idx * col_count + j);
-        const char* str = val->type == TYPE_NULL ? "NULL" : repr(val);
+        Value *val = (Value *)alist_get(&result->values, row_idx * col_count + j);
+        const char *str = val->type == TYPE_NULL ? "NULL" : repr(val);
         int str_width = get_str_width(str);
         int padding = col_widths[j].width - str_width;
         int left_pad = padding / 2;
@@ -130,14 +131,15 @@ static void print_row_data(QueryResult* result, ColumnWidth* col_widths, int col
     printf("\n");
 }
 
-void print_pretty_result(QueryResult* result) {
+void print_pretty_result(QueryResult *result) {
     if (!result || alist_length(&result->rows) == 0) {
         return;
     }
 
     int col_count = result->col_count;
-    ColumnWidth* col_widths = malloc(col_count * sizeof(ColumnWidth));
-    if (!col_widths) return;
+    ColumnWidth *col_widths = malloc(col_count * sizeof(ColumnWidth));
+    if (!col_widths)
+        return;
 
     calculate_column_widths(result, col_widths, col_count);
 

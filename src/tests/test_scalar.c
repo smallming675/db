@@ -1,11 +1,8 @@
-#include <math.h>
-#include <stdio.h>
 #include <string.h>
+#include <assert.h>
 
-#include "arraylist.h"
 #include "db.h"
 #include "logger.h"
-#include "table.h"
 #include "test_util.h"
 
 void test_string_functions(void) {
@@ -146,4 +143,64 @@ void test_scalar_in_expressions(void) {
     exec("SELECT POWER(a, b) FROM calc;");
 
     log_msg(LOG_INFO, "Scalar functions in expressions tests passed");
+}
+
+void test_coalesce_function(void) {
+    log_msg(LOG_INFO, "Testing COALESCE function...\n");
+
+    Value null_val = {.type = TYPE_NULL};
+    Value int_val = {.type = TYPE_INT, .int_val = 42};
+    Value str_val = {.type = TYPE_STRING, .char_val = "hello"};
+
+    Value args1[] = {null_val, int_val};
+    Value args2[] = {null_val, str_val};
+    Value args3[] = {null_val, null_val};
+
+    Value result1 = scalar_coalesce(args1, 2);
+    Value result2 = scalar_coalesce(args2, 2);
+    Value result3 = scalar_coalesce(args3, 2);
+
+    assert(result1.type == TYPE_INT);
+    assert(result1.int_val == 42);
+
+    assert(result2.type == TYPE_STRING);
+    assert(strcmp(result2.char_val, "hello") == 0);
+
+    assert(result3.type == TYPE_NULL);
+
+    log_msg(LOG_INFO, "COALESCE tests passed");
+}
+
+void test_nullif_function(void) {
+    log_msg(LOG_INFO, "Testing NULLIF function...\n");
+
+    Value int1 = {.type = TYPE_INT, .int_val = 10};
+    Value int2 = {.type = TYPE_INT, .int_val = 10};
+    Value int3 = {.type = TYPE_INT, .int_val = 20};
+
+    Value result1 = scalar_nullif(&int1, &int2);
+    Value result2 = scalar_nullif(&int1, &int3);
+
+    assert(result1.type == TYPE_NULL);
+    assert(result2.type == TYPE_INT);
+    assert(result2.int_val == 10);
+
+    log_msg(LOG_INFO, "NULLIF tests passed");
+}
+
+void test_date_functions(void) {
+    log_msg(LOG_INFO, "Testing date/time functions...\n");
+
+    unsigned int date_val = 20250121;
+    unsigned int time_val = 143045;
+
+    assert(date_year(date_val) == 2025);
+    assert(date_month(date_val) == 1);
+    assert(date_day(date_val) == 21);
+
+    assert(time_hour(time_val) == 14);
+    assert(time_minute(time_val) == 30);
+    assert(time_second(time_val) == 45);
+
+    log_msg(LOG_INFO, "Date/time function tests passed");
 }

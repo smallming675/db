@@ -1,10 +1,7 @@
-#include <stdio.h>
-#include <string.h>
-
 #include "arraylist.h"
 #include "db.h"
 #include "logger.h"
-#include "table.h"
+#include "utils.h"
 #include "test_util.h"
 
 extern ArrayList indexes;
@@ -24,7 +21,7 @@ void test_create_index(void) {
     int index_count = alist_length(&indexes);
     assert_int_eq(1, index_count, "Should have 1 index");
 
-    Index* index = (Index*)alist_get(&indexes, 0);
+    Index *index = (Index *)alist_get(&indexes, 0);
     assert_ptr_not_null(index, "Index should exist");
     assert_true(index->index_name[0] != '\0', "Index name should be set");
     assert_true(index->table_name[0] != '\0', "Index table name should be set");
@@ -70,7 +67,7 @@ void test_index_on_string_column(void) {
 
     exec("CREATE INDEX idx_customers_name ON customers (name);");
 
-    Index* index = (Index*)alist_get(&indexes, 0);
+    Index *index = (Index *)alist_get(&indexes, 0);
     assert_ptr_not_null(index, "Index should exist");
     assert_int_eq(3, index->entry_count, "Index should have 3 entries");
 
@@ -100,13 +97,12 @@ void test_index_filter_equality(void) {
     exec("CREATE TABLE users (id INT PRIMARY KEY, name STRING);");
     for (int i = 1; i <= 100; i++) {
         char sql[128];
-        snprintf(sql, sizeof(sql), "INSERT INTO users VALUES (%d, 'User%d');", i, i);
+        string_format(sql, sizeof(sql), "INSERT INTO users VALUES (%d, 'User%d');", i, i);
         exec(sql);
     }
 
     exec("CREATE INDEX idx_users_id ON users (id);");
 
-    // Create a simple SELECT that uses the index but don't check results
     exec("SELECT * FROM users WHERE id = 50;");
 
     log_msg(LOG_INFO, "Index usage for equality filter tests passed");
@@ -122,11 +118,11 @@ void test_index_filter_with_large_table(void) {
 
     for (int i = 1; i <= 1000; i++) {
         char sql[128];
-        snprintf(sql, sizeof(sql), "INSERT INTO large_table VALUES (%d, 'Data%d');", i, i);
+        string_format(sql, sizeof(sql), "INSERT INTO large_table VALUES (%d, 'Data%d');", i, i);
         exec(sql);
     }
 
-    Index* index = (Index*)alist_get(&indexes, 0);
+    Index *index = (Index *)alist_get(&indexes, 0);
     assert_int_eq(1000, index->entry_count, "Index should have 1000 entries");
 
     exec("SELECT * FROM large_table WHERE id = 999;");
@@ -184,18 +180,20 @@ void test_hash_join_large_tables(void) {
 
     for (int i = 1; i <= 500; i++) {
         char sql[128];
-        snprintf(sql, sizeof(sql), "INSERT INTO customers VALUES (%d, 'Customer%d');", i, i);
+        string_format(sql, sizeof(sql), "INSERT INTO customers VALUES (%d, 'Customer%d');", i, i);
         exec(sql);
     }
 
     for (int i = 1; i <= 1000; i++) {
         int cust_id = (i % 500) + 1;
         char sql[128];
-        snprintf(sql, sizeof(sql), "INSERT INTO orders VALUES (%d, %d, %.2f);", i, cust_id, (float)(i * 10));
+        string_format(sql, sizeof(sql), "INSERT INTO orders VALUES (%d, %d, %.2f);", i, cust_id,
+                      (float)(i * 10));
         exec(sql);
     }
 
-    exec("SELECT * FROM orders JOIN customers ON orders.customer_id = customers.customer_id LIMIT 100;");
+    exec("SELECT * FROM orders JOIN customers ON orders.customer_id = customers.customer_id LIMIT "
+         "100;");
 
     log_msg(LOG_INFO, "HASH JOIN with large tables tests passed");
 }
@@ -216,7 +214,8 @@ void test_hash_join_multiple_matches(void) {
     exec("INSERT INTO products VALUES (4, 'Novel', 2);");
     exec("INSERT INTO products VALUES (5, 'Magazine', 2);");
 
-    exec("SELECT c.name AS category, p.name AS product FROM categories c JOIN products p ON c.id = p.category_id;");
+    exec("SELECT c.name AS category, p.name AS product FROM categories c JOIN products p ON c.id = "
+         "p.category_id;");
 
     log_msg(LOG_INFO, "HASH JOIN with multiple matches tests passed");
 }
@@ -268,7 +267,7 @@ void test_index_rebuild(void) {
     exec("INSERT INTO test VALUES (2, 'Two');");
     exec("INSERT INTO test VALUES (3, 'Three');");
 
-    Index* index = (Index*)alist_get(&indexes, 0);
+    Index *index = (Index *)alist_get(&indexes, 0);
     assert_int_eq(3, index->entry_count, "Index should have 3 entries after inserts");
 
     exec("INSERT INTO test VALUES (4, 'Four');");
@@ -282,7 +281,8 @@ void test_complex_join_with_index(void) {
 
     reset_database();
 
-    exec("CREATE TABLE orders (order_id INT PRIMARY KEY, customer_id INT, product_id INT, quantity INT);");
+    exec("CREATE TABLE orders (order_id INT PRIMARY KEY, customer_id INT, product_id INT, quantity "
+         "INT);");
     exec("CREATE TABLE customers (customer_id INT PRIMARY KEY, name STRING, city_id INT);");
     exec("CREATE TABLE products (product_id INT PRIMARY KEY, name STRING, price FLOAT);");
     exec("CREATE TABLE cities (city_id INT PRIMARY KEY, name STRING);");
@@ -292,25 +292,22 @@ void test_complex_join_with_index(void) {
 
     for (int i = 1; i <= 10; i++) {
         char sql[256];
-        snprintf(sql, sizeof(sql),
-                 "INSERT INTO customers VALUES (%d, 'Customer%d', %d);",
-                 i, i, (i % 5) + 1);
+        string_format(sql, sizeof(sql), "INSERT INTO customers VALUES (%d, 'Customer%d', %d);", i,
+                      i, (i % 5) + 1);
         exec(sql);
     }
 
     for (int i = 1; i <= 20; i++) {
         char sql[256];
-        snprintf(sql, sizeof(sql),
-                 "INSERT INTO products VALUES (%d, 'Product%d', %.2f);",
-                 i, i, (float)(i * 10));
+        string_format(sql, sizeof(sql), "INSERT INTO products VALUES (%d, 'Product%d', %.2f);", i,
+                      i, (float)(i * 10));
         exec(sql);
     }
 
     for (int i = 1; i <= 100; i++) {
         char sql[256];
-        snprintf(sql, sizeof(sql),
-                 "INSERT INTO orders VALUES (%d, %d, %d, %d);",
-                 i, (i % 10) + 1, (i % 20) + 1, (i % 10) + 1);
+        string_format(sql, sizeof(sql), "INSERT INTO orders VALUES (%d, %d, %d, %d);", i,
+                      (i % 10) + 1, (i % 20) + 1, (i % 10) + 1);
         exec(sql);
     }
 

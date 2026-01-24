@@ -19,7 +19,7 @@ void test_select_all(void) {
 
     exec("SELECT * FROM users;");
 
-    Table* table = find_table_by_name("users");
+    Table *table = find_table_by_name("users");
     assert_int_eq(3, alist_length(&table->rows), "Table should have 3 rows");
 
     log_msg(LOG_INFO, "SELECT * tests passed");
@@ -69,9 +69,8 @@ void test_select_with_and_or(void) {
 
     exec("SELECT * FROM employees WHERE department = 'Engineering' AND salary > 75000;");
     exec("SELECT * FROM employees WHERE department = 'Sales' OR department = 'Engineering';");
-    exec(
-        "SELECT * FROM employees WHERE (department = 'Sales' AND salary > 60000) OR department = "
-        "'Engineering';");
+    exec("SELECT * FROM employees WHERE (department = 'Sales' AND salary > 60000) OR department = "
+         "'Engineering';");
 
     log_msg(LOG_INFO, "SELECT with AND/OR tests passed");
 }
@@ -165,7 +164,6 @@ void test_select_is_null(void) {
     exec("INSERT INTO nullable_test VALUES (3, 30);");
 
     exec("SELECT * FROM nullable_test WHERE value IS NULL;");
-    // exec("SELECT * FROM nullable_test WHERE value IS NOT NULL;");
 
     log_msg(LOG_INFO, "SELECT with IS NULL tests passed");
 }
@@ -241,14 +239,16 @@ void test_select_with_multiple_conditions(void) {
 
     reset_database();
 
-    exec("CREATE TABLE employees (id INT, name STRING, department STRING, salary FLOAT, active INT);");
+    exec("CREATE TABLE employees (id INT, name STRING, department STRING, salary FLOAT, active "
+         "INT);");
     exec("INSERT INTO employees VALUES (1, 'Alice', 'Engineering', 75000, 1);");
     exec("INSERT INTO employees VALUES (2, 'Bob', 'Engineering', 80000, 1);");
     exec("INSERT INTO employees VALUES (3, 'Charlie', 'Sales', 65000, 0);");
     exec("INSERT INTO employees VALUES (4, 'Diana', 'Sales', 70000, 1);");
     exec("INSERT INTO employees VALUES (5, 'Eve', 'Engineering', 85000, 1);");
 
-    exec("SELECT * FROM employees WHERE department = 'Engineering' AND salary > 75000 AND active = 1;");
+    exec("SELECT * FROM employees WHERE department = 'Engineering' AND salary > 75000 AND active = "
+         "1;");
     exec("SELECT * FROM employees WHERE department = 'Sales' OR active = 0;");
 
     log_msg(LOG_INFO, "SELECT with multiple conditions tests passed");
@@ -274,7 +274,8 @@ void test_select_all_columns(void) {
 
     reset_database();
 
-    exec("CREATE TABLE full_table (id INT, name STRING, value INT, active INT, description STRING);");
+    exec("CREATE TABLE full_table (id INT, name STRING, value INT, active INT, description "
+         "STRING);");
     exec("INSERT INTO full_table VALUES (1, 'Test', 42, 1, 'Description');");
     exec("INSERT INTO full_table VALUES (2, 'Demo', 99, 0, 'Another description');");
 

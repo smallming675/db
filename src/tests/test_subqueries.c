@@ -18,13 +18,11 @@ void test_subquery_with_comparison(void) {
     exec("INSERT INTO products VALUES (3, 'Coffee A', 'Coffee', 4.00);");
     exec("INSERT INTO products VALUES (4, 'Coffee B', 'Coffee', 4.50);");
 
-    exec(
-        "SELECT name, price FROM products WHERE category = 'Tea' AND price = (SELECT MAX(price) "
-        "FROM products WHERE category = 'Tea');");
+    exec("SELECT name, price FROM products WHERE category = 'Tea' AND price = (SELECT MAX(price) "
+         "FROM products WHERE category = 'Tea');");
     exec("SELECT name, price FROM products WHERE price < (SELECT AVG(price) FROM products);");
-    exec(
-        "SELECT name, price FROM products WHERE price = (SELECT MIN(price) FROM products WHERE "
-        "category = 'Coffee');");
+    exec("SELECT name, price FROM products WHERE price = (SELECT MIN(price) FROM products WHERE "
+         "category = 'Coffee');");
 
     log_msg(LOG_INFO, "Subquery with comparison tests passed");
 }
@@ -124,9 +122,8 @@ void test_subquery_with_join(void) {
     exec("INSERT INTO products VALUES (1, 'Laptop', 1, 999.99);");
     exec("INSERT INTO products VALUES (2, 'Book', 2, 29.99);");
 
-    exec(
-        "SELECT p.name, p.price, c.name FROM products p JOIN categories c ON p.cat_id = c.cat_id "
-        "WHERE p.price = (SELECT MAX(price) FROM products);");
+    exec("SELECT p.name, p.price, c.name FROM products p JOIN categories c ON p.cat_id = c.cat_id "
+         "WHERE p.price = (SELECT MAX(price) FROM products);");
 
     log_msg(LOG_INFO, "Subquery with JOIN tests passed");
 }
@@ -141,9 +138,8 @@ void test_scalar_subquery(void) {
     exec("INSERT INTO stats VALUES (2, 'A', 20.0);");
     exec("INSERT INTO stats VALUES (3, 'B', 15.0);");
 
-    exec(
-        "SELECT category, (SELECT AVG(value) FROM stats WHERE category = 'A') as avg_a FROM stats "
-        "GROUP BY category;");
+    exec("SELECT category, (SELECT AVG(value) FROM stats WHERE category = 'A') as avg_a FROM stats "
+         "GROUP BY category;");
 
     log_msg(LOG_INFO, "Scalar subquery tests passed");
 }
