@@ -113,7 +113,7 @@ static Value eval_string_func_mid(const Value *arg1, const Value *arg2, const Va
             int copy_len = (start + len > src_len) ? (src_len - start) : len;
             result.char_val = malloc(copy_len + 1);
             if (copy_len > 0) {
-                memory_copy(result.char_val, arg1->char_val + start, (size_t)copy_len);
+                memcopy(result.char_val, arg1->char_val + start, (size_t)copy_len);
             }
             result.char_val[copy_len] = '\0';
         } else {
@@ -136,7 +136,7 @@ static Value eval_string_func_left(const Value *arg1, const Value *arg2) {
         int copy_len = len < src_len ? len : src_len;
         result.char_val = malloc(copy_len + 1);
         if (copy_len > 0) {
-            memory_copy(result.char_val, arg1->char_val, (size_t)copy_len);
+            memcopy(result.char_val, arg1->char_val, (size_t)copy_len);
         }
         result.char_val[copy_len] = '\0';
     } else {
@@ -157,7 +157,7 @@ static Value eval_string_func_right(const Value *arg1, const Value *arg2) {
             start = 0;
         int copy_len = src_len - start;
         result.char_val = malloc(copy_len + 1);
-        memory_copy(result.char_val, arg1->char_val + start, copy_len);
+        memcopy(result.char_val, arg1->char_val + start, copy_len);
         result.char_val[copy_len] = '\0';
     } else {
         result.char_val = malloc(1);
@@ -183,7 +183,7 @@ static Value eval_string_func_concat(const Expr *expr, const Row *row, const Tab
     for (int i = 0; i < expr->scalar.arg_count; i++) {
         Value arg = eval_select_expression(expr->scalar.args[i], row, schema);
         if (arg.type == TYPE_STRING && arg.char_val) {
-            string_append(result.char_val, capacity, arg.char_val);
+            str_append(result.char_val, capacity, arg.char_val);
         }
     }
     return result;

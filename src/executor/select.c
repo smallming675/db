@@ -161,7 +161,7 @@ static void probe_hash_table(const HashJoinTable *ht, Table *probe_table,
                 if (new_row) {
                     Row *slot = (Row *)alist_append(&result_table->rows);
                     if (slot) {
-                        memory_clear(slot, sizeof(Row));
+                        memclear(slot, sizeof(Row));
                         alist_init(slot, sizeof(Value), free_value);
                         for (int k = 0; k < alist_length(new_row); k++) {
                             Value *src_val = (Value *)alist_get(new_row, k);
@@ -234,7 +234,7 @@ static bool try_hash_join(Table *result_table, SelectNode *select, Table *left_t
                 if (new_row) {
                     Row *slot = (Row *)alist_append(&result_table->rows);
                     if (slot) {
-                        memory_clear(slot, sizeof(Row));
+                        memclear(slot, sizeof(Row));
                         alist_init(slot, sizeof(Value), free_value);
                         for (int k = 0; k < alist_length(new_row); k++) {
                             Value *src_val = (Value *)alist_get(new_row, k);
@@ -299,7 +299,7 @@ uint16_t exec_join_ast(ASTNode *ast) {
     uint16_t result_id = join_counter;
 
     Table result_table;
-    memory_clear(&result_table, sizeof(Table));
+    memclear(&result_table, sizeof(Table));
 
     if (!init_join_result_table(&result_table, select, left_table, right_table)) {
         log_msg(LOG_ERROR, "JOIN failed: unable to initialize result table");
@@ -397,7 +397,7 @@ static void process_join_rows(Table *result_table, SelectNode *select, Table *le
             if (new_row) {
                 Row *slot = (Row *)alist_append(&result_table->rows);
                 if (slot) {
-                    memory_clear(slot, sizeof(Row));
+                    memclear(slot, sizeof(Row));
                     alist_init(slot, sizeof(Value), free_value);
                     int src_len = alist_length(new_row);
                     for (int k = 0; k < src_len; k++) {
@@ -415,8 +415,8 @@ static void process_join_rows(Table *result_table, SelectNode *select, Table *le
 static void copy_result_to_global_tables(Table *result_table) {
     Table *t = (Table *)alist_append(&tables);
     if (t) {
-        memory_clear(t, sizeof(Table));
-        string_copy(t->name, sizeof(t->name), result_table->name);
+        memclear(t, sizeof(Table));
+        strcopy(t->name, sizeof(t->name), result_table->name);
         t->table_id = result_table->table_id;
         t->schema.strict = result_table->schema.strict;
         alist_init(&t->rows, sizeof(Row), free_row_contents);
@@ -767,7 +767,7 @@ static void setup_query_result(QueryResult **result, Table *table, SelectNode *s
     if (!*result)
         return;
 
-    memory_clear(*result, sizeof(QueryResult));
+    memclear(*result, sizeof(QueryResult));
     (*result)->col_count = col_count;
     alist_init(&(*result)->column_names, sizeof(char *), free_string_ptr);
     alist_init(&(*result)->values, sizeof(Value), free_value);
@@ -789,7 +789,7 @@ static void setup_query_result(QueryResult **result, Table *table, SelectNode *s
             log_msg(LOG_ERROR, "setup_query_result: Failed to allocate memory for column name");
             continue;
         }
-        string_copy(name_copy, strlen(name) + 1, name);
+        strcopy(name_copy, strlen(name) + 1, name);
         char **slot = (char **)alist_append(&(*result)->column_names);
         *slot = name_copy;
     }

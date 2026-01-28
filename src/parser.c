@@ -81,7 +81,7 @@ static void suggest_similar_table(ParseContext *ctx, const char *requested_name)
 
     if (best_match) {
         string_format(ctx->error.suggestion, sizeof(ctx->error.suggestion), "Did you mean '%s'?",
-                 best_match);
+                      best_match);
     }
 }
 
@@ -290,91 +290,92 @@ static const char *get_context_suggestion(const char *context, TokenType expecte
     if (strcmp(context, "CREATE TABLE") == 0) {
         if (expected == TOKEN_IDENTIFIER) {
             string_format(suggestion, sizeof(suggestion),
-                     "CREATE TABLE syntax:\n"
-                     "  CREATE TABLE table_name (column1 type1, column2 type2, ...)\n"
-                     "Example: CREATE TABLE users (id INT, name STRING, age INT)");
+                          "CREATE TABLE syntax:\n"
+                          "  CREATE TABLE table_name (column1 type1, column2 type2, ...)\n"
+                          "Example: CREATE TABLE users (id INT, name STRING, age INT)");
         } else if (expected == TOKEN_LPAREN) {
             string_format(suggestion, sizeof(suggestion),
-                     "After table name, expect opening parenthesis '('\n"
-                     "  CREATE TABLE table_name ( ... )");
+                          "After table name, expect opening parenthesis '('\n"
+                          "  CREATE TABLE table_name ( ... )");
         } else if (expected == TOKEN_RPAREN) {
             string_format(suggestion, sizeof(suggestion),
-                     "Column definitions should end with closing parenthesis ')'\n"
-                     "  CREATE TABLE users (id INT, name STRING)");
+                          "Column definitions should end with closing parenthesis ')'\n"
+                          "  CREATE TABLE users (id INT, name STRING)");
         } else {
             string_format(suggestion, sizeof(suggestion), "Check CREATE TABLE syntax");
         }
     } else if (strcmp(context, "INSERT") == 0) {
         if (expected == TOKEN_KEYWORD && strcmp(current_token[-1].value, "INTO") == 0) {
             string_format(suggestion, sizeof(suggestion),
-                     "INSERT syntax:\n"
-                     "  INSERT INTO table_name VALUES (value1, value2, ...)\n"
-                     "Example: INSERT INTO users VALUES ('John', 25)");
+                          "INSERT syntax:\n"
+                          "  INSERT INTO table_name VALUES (value1, value2, ...)\n"
+                          "Example: INSERT INTO users VALUES ('John', 25)");
         } else if (expected == TOKEN_LPAREN) {
             string_format(suggestion, sizeof(suggestion),
-                     "After VALUES keyword, expect opening parenthesis '('\n"
-                     "  INSERT INTO table_name VALUES ( ... )");
+                          "After VALUES keyword, expect opening parenthesis '('\n"
+                          "  INSERT INTO table_name VALUES ( ... )");
         } else if (expected == TOKEN_RPAREN) {
             string_format(suggestion, sizeof(suggestion),
-                     "Values should end with closing parenthesis ')'\n"
-                     "  INSERT INTO users VALUES ('John', 25)");
+                          "Values should end with closing parenthesis ')'\n"
+                          "  INSERT INTO users VALUES ('John', 25)");
         } else {
             string_format(suggestion, sizeof(suggestion), "Check INSERT syntax");
         }
     } else if (strcmp(context, "SELECT") == 0) {
         if (expected == TOKEN_KEYWORD && strcmp(current_token[-1].value, "FROM") == 0) {
             string_format(suggestion, sizeof(suggestion),
-                     "SELECT syntax:\n"
-                     "  SELECT columns FROM table_name [WHERE condition]\n"
-                     "Examples:\n"
-                     "  SELECT * FROM users\n"
-                     "  SELECT name, age FROM users WHERE age > 18");
+                          "SELECT syntax:\n"
+                          "  SELECT columns FROM table_name [WHERE condition]\n"
+                          "Examples:\n"
+                          "  SELECT * FROM users\n"
+                          "  SELECT name, age FROM users WHERE age > 18");
         } else if (expected == TOKEN_IDENTIFIER) {
             string_format(suggestion, sizeof(suggestion),
-                     "After FROM keyword, expect table name\n"
-                     "  SELECT * FROM table_name");
+                          "After FROM keyword, expect table name\n"
+                          "  SELECT * FROM table_name");
         } else {
             string_format(suggestion, sizeof(suggestion), "Check SELECT syntax");
         }
     } else if (strcmp(context, "UPDATE") == 0) {
         if (expected == TOKEN_IDENTIFIER) {
-            string_format(suggestion, sizeof(suggestion),
-                     "UPDATE syntax:\n"
-                     "  UPDATE table_name SET column1=value1, column2=value2 [WHERE condition]\n"
-                     "Example: UPDATE users SET age=30 WHERE name='John'");
+            string_format(
+                suggestion, sizeof(suggestion),
+                "UPDATE syntax:\n"
+                "  UPDATE table_name SET column1=value1, column2=value2 [WHERE condition]\n"
+                "Example: UPDATE users SET age=30 WHERE name='John'");
         } else if (expected == TOKEN_KEYWORD && strcmp(current_token[-1].value, "SET") == 0) {
             string_format(suggestion, sizeof(suggestion),
-                     "After table name, expect SET keyword\n"
-                     "  UPDATE table_name SET column=value");
+                          "After table name, expect SET keyword\n"
+                          "  UPDATE table_name SET column=value");
         } else {
             string_format(suggestion, sizeof(suggestion), "Check UPDATE syntax");
         }
     } else if (strcmp(context, "DELETE") == 0) {
         if (expected == TOKEN_KEYWORD && strcmp(current_token[-1].value, "FROM") == 0) {
             string_format(suggestion, sizeof(suggestion),
-                     "DELETE syntax:\n"
-                     "  DELETE FROM table_name [WHERE condition]\n"
-                     "Examples:\n"
-                     "  DELETE FROM users WHERE age < 18");
+                          "DELETE syntax:\n"
+                          "  DELETE FROM table_name [WHERE condition]\n"
+                          "Examples:\n"
+                          "  DELETE FROM users WHERE age < 18");
         } else {
             string_format(suggestion, sizeof(suggestion), "Check DELETE syntax");
         }
     } else if (strcmp(context, "aggregate function") == 0) {
         string_format(suggestion, sizeof(suggestion),
-                 "Aggregate function syntax:\n"
-                 "  COUNT([DISTINCT] column | *)\n"
-                 "  SUM(column), AVG(column), MIN(column), MAX(column)\n"
-                 "Examples:\n"
-                 "  COUNT(*)\n"
-                 "  COUNT(DISTINCT name)\n"
-                 "  SUM(price)");
+                      "Aggregate function syntax:\n"
+                      "  COUNT([DISTINCT] column | *)\n"
+                      "  SUM(column), AVG(column), MIN(column), MAX(column)\n"
+                      "Examples:\n"
+                      "  COUNT(*)\n"
+                      "  COUNT(DISTINCT name)\n"
+                      "  SUM(price)");
     } else if (strcmp(context, "expression") == 0) {
         string_format(suggestion, sizeof(suggestion),
-                 "Expression should be:\n"
-                 "  - A column name (identifier)\n"
-                 "  - A value (string, number, date, time)\n"
-                 "  - An aggregate function (COUNT, SUM, AVG, MIN, MAX)\n"
-                 "  - A parenthesized expression (expr)");
+                      "Expression should be:\n"
+                      "  - A column name (identifier)\n"
+                      "  - A value (string, number, date, time)\n"
+                      "  - An aggregate function (COUNT, SUM, AVG, MIN, MAX)\n"
+                      "  - A parenthesized expression (expr)");
     } else {
         string_format(suggestion, sizeof(suggestion), "Check syntax near '%s'", context);
     }
@@ -387,9 +388,9 @@ static void parse_error_init(ParseContext *ctx, const char *input, Token *tokens
     ctx->token_count = token_count;
     ctx->current_token_index = 0;
     ctx->error_occurred = false;
-    memory_clear(&ctx->error, sizeof(ParseError));
+    memclear(&ctx->error, sizeof(ParseError));
     if (input) {
-        string_copy(ctx->input, sizeof(ctx->input), input);
+        strcopy(ctx->input, sizeof(ctx->input), input);
     } else {
         ctx->input[0] = '\0';
     }
@@ -401,19 +402,19 @@ static void parse_error_set(ParseContext *ctx, ParseErrorCode code, const char *
     ctx->error.code = code;
 
     if (message) {
-        string_copy(ctx->error.message, sizeof(ctx->error.message), message);
+        strcopy(ctx->error.message, sizeof(ctx->error.message), message);
     }
 
     if (expected) {
-        string_copy(ctx->error.expected, sizeof(ctx->error.expected), expected);
+        strcopy(ctx->error.expected, sizeof(ctx->error.expected), expected);
     }
 
     if (found) {
-        string_copy(ctx->error.found, sizeof(ctx->error.found), found);
+        strcopy(ctx->error.found, sizeof(ctx->error.found), found);
     }
 
     if (suggestion) {
-        string_copy(ctx->error.suggestion, sizeof(ctx->error.suggestion), suggestion);
+        strcopy(ctx->error.suggestion, sizeof(ctx->error.suggestion), suggestion);
     }
 
     ctx->error.token_index = token_index;
@@ -462,8 +463,8 @@ static void print_token_context(ParseContext *ctx) {
         if (i == ctx->error.token_index) {
             print_error_line(stderr,
                              "  " COLOR_DIM "[%d] " COLOR_RESET COLOR_YELLOW "%-20s" COLOR_RESET
-                             " " COLOR_CYAN "'%s'" COLOR_RESET " " COLOR_RED "<-- ERROR HERE"
-                             COLOR_RESET "\n",
+                             " " COLOR_CYAN "'%s'" COLOR_RESET " " COLOR_RED
+                             "<-- ERROR HERE" COLOR_RESET "\n",
                              i, token_type_name(t->type), t->value);
         } else if (i > ctx->error.token_index - 3 && i < ctx->error.token_index + 3) {
             print_error_line(stderr,
@@ -626,82 +627,83 @@ static void expect_get_eof_error_msg(const char *context, char *msg, size_t msg_
     if (strcmp(context, "SELECT") == 0) {
         string_format(msg, msg_size, "Missing table name after FROM");
         string_format(suggestion, sugg_size,
-                 "SELECT syntax:\n"
-                 "  SELECT columns FROM table_name [WHERE condition]\n\n"
-                 "You need to provide:\n"
-                 "  1. A table name after FROM (required)\n"
-                 "  2. Optional WHERE clause to filter results\n\n"
-                 "Examples:\n"
-                 "  SELECT * FROM users\n"
-                 "  SELECT name, age FROM users\n"
-                 "  SELECT * FROM users WHERE age > 18");
+                      "SELECT syntax:\n"
+                      "  SELECT columns FROM table_name [WHERE condition]\n\n"
+                      "You need to provide:\n"
+                      "  1. A table name after FROM (required)\n"
+                      "  2. Optional WHERE clause to filter results\n\n"
+                      "Examples:\n"
+                      "  SELECT * FROM users\n"
+                      "  SELECT name, age FROM users\n"
+                      "  SELECT * FROM users WHERE age > 18");
     } else if (strcmp(context, "CREATE TABLE") == 0) {
         string_format(msg, msg_size, "Incomplete CREATE TABLE statement");
         string_format(suggestion, sugg_size,
-                 "CREATE TABLE syntax:\n"
-                 "  CREATE TABLE table_name (column1 type1, column2 type2, ...)\n\n"
-                 "You need to provide:\n"
-                 "  1. A table name (required)\n"
-                 "  2. Column definitions inside parentheses (required)\n\n"
-                 "Examples:\n"
-                 "  CREATE TABLE users (id INT, name STRING)\n"
-                 "  CREATE TABLE products (id INT, name STRING, price FLOAT)");
+                      "CREATE TABLE syntax:\n"
+                      "  CREATE TABLE table_name (column1 type1, column2 type2, ...)\n\n"
+                      "You need to provide:\n"
+                      "  1. A table name (required)\n"
+                      "  2. Column definitions inside parentheses (required)\n\n"
+                      "Examples:\n"
+                      "  CREATE TABLE users (id INT, name STRING)\n"
+                      "  CREATE TABLE products (id INT, name STRING, price FLOAT)");
     } else if (strcmp(context, "INSERT") == 0) {
         string_format(msg, msg_size, "Incomplete INSERT statement");
         string_format(suggestion, sugg_size,
-                 "INSERT syntax:\n"
-                 "  INSERT INTO table_name VALUES (value1, value2, ...)\n\n"
-                 "You need to provide:\n"
-                 "  1. Table name after INTO (required)\n"
-                 "  2. VALUES keyword (required)\n"
-                 "  3. Values inside parentheses (required)\n\n"
-                 "Examples:\n"
-                 "  INSERT INTO users VALUES ('John', 25)\n"
-                 "  INSERT INTO products VALUES ('Widget', 19.99)");
+                      "INSERT syntax:\n"
+                      "  INSERT INTO table_name VALUES (value1, value2, ...)\n\n"
+                      "You need to provide:\n"
+                      "  1. Table name after INTO (required)\n"
+                      "  2. VALUES keyword (required)\n"
+                      "  3. Values inside parentheses (required)\n\n"
+                      "Examples:\n"
+                      "  INSERT INTO users VALUES ('John', 25)\n"
+                      "  INSERT INTO products VALUES ('Widget', 19.99)");
     } else if (strcmp(context, "UPDATE") == 0) {
         string_format(msg, msg_size, "Incomplete UPDATE statement");
         string_format(suggestion, sugg_size,
-                 "UPDATE syntax:\n"
-                 "  UPDATE table_name SET column1=value1, ... [WHERE condition]\n\n"
-                 "You need to provide:\n"
-                 "  1. A table name (required)\n"
-                 "  2. SET keyword followed by assignments (required)\n"
-                 "  3. Optional WHERE clause to filter updates\n\n"
-                 "Examples:\n"
-                 "  UPDATE users SET age=30\n"
-                 "  UPDATE users SET age=30 WHERE name='John'");
+                      "UPDATE syntax:\n"
+                      "  UPDATE table_name SET column1=value1, ... [WHERE condition]\n\n"
+                      "You need to provide:\n"
+                      "  1. A table name (required)\n"
+                      "  2. SET keyword followed by assignments (required)\n"
+                      "  3. Optional WHERE clause to filter updates\n\n"
+                      "Examples:\n"
+                      "  UPDATE users SET age=30\n"
+                      "  UPDATE users SET age=30 WHERE name='John'");
     } else if (strcmp(context, "DELETE") == 0) {
         string_format(msg, msg_size, "Incomplete DELETE statement");
         string_format(suggestion, sugg_size,
-                 "DELETE syntax:\n"
-                 "  DELETE FROM table_name [WHERE condition]\n\n"
-                 "You need to provide:\n"
-                 "  1. A table name after FROM (required)\n"
-                 "  2. Optional WHERE clause to filter deletions\n\n"
-                 "Examples:\n"
-                 "  DELETE FROM users\n"
-                 "  DELETE FROM users WHERE age < 18");
+                      "DELETE syntax:\n"
+                      "  DELETE FROM table_name [WHERE condition]\n\n"
+                      "You need to provide:\n"
+                      "  1. A table name after FROM (required)\n"
+                      "  2. Optional WHERE clause to filter deletions\n\n"
+                      "Examples:\n"
+                      "  DELETE FROM users\n"
+                      "  DELETE FROM users WHERE age < 18");
     } else if (strcmp(context, "aggregate function") == 0) {
-        string_format(msg, msg_size, "Missing closing parenthesis or argument in aggregate function");
+        string_format(msg, msg_size,
+                      "Missing closing parenthesis or argument in aggregate function");
         string_format(suggestion, sugg_size,
-                 "Aggregate function syntax:\n"
-                 "  COUNT([DISTINCT] column | *)\n"
-                 "  SUM(column), AVG(column), MIN(column), MAX(column)\n\n"
-                 "Examples:\n"
-                 "  COUNT(*)\n"
-                 "  COUNT(DISTINCT name)\n"
-                 "  SUM(price)");
+                      "Aggregate function syntax:\n"
+                      "  COUNT([DISTINCT] column | *)\n"
+                      "  SUM(column), AVG(column), MIN(column), MAX(column)\n\n"
+                      "Examples:\n"
+                      "  COUNT(*)\n"
+                      "  COUNT(DISTINCT name)\n"
+                      "  SUM(price)");
     } else if (strcmp(context, "expression") == 0) {
         string_format(msg, msg_size, "Unexpected end of expression");
         string_format(suggestion, sugg_size,
-                 "Expression should contain:\n"
-                 "  - Column names or values\n"
-                 "  - Operators (=, !=, <, >, AND, OR)\n"
-                 "  - Aggregate functions\n\n"
-                 "Examples:\n"
-                 "  age > 18\n"
-                 "  name = 'John' AND age >= 21\n"
-                 "  price * quantity > 100");
+                      "Expression should contain:\n"
+                      "  - Column names or values\n"
+                      "  - Operators (=, !=, <, >, AND, OR)\n"
+                      "  - Aggregate functions\n\n"
+                      "Examples:\n"
+                      "  age > 18\n"
+                      "  name = 'John' AND age >= 21\n"
+                      "  price * quantity > 100");
     } else {
         string_format(msg, msg_size, "Unexpected end of input while parsing %s", context);
         string_format(suggestion, sugg_size, "Check the syntax for %s statement", context);
@@ -720,7 +722,7 @@ static bool expect(ParseContext *ctx, TokenType type, const char *context) {
     char suggestion[512];
 
     string_format(expected, sizeof(expected), "%s (%s)", token_type_name(type),
-             get_token_type_desc(type));
+                  get_token_type_desc(type));
 
     if (current_token->type == TOKEN_EOF) {
         string_format(found, sizeof(found), "end of input");
@@ -734,7 +736,7 @@ static bool expect(ParseContext *ctx, TokenType type, const char *context) {
         if (val_len > 100)
             val_len = 100;
         string_format(found, sizeof(found), "%.*s '%.*s'", (int)type_len, type_name, (int)val_len,
-                 current_token->value);
+                      current_token->value);
         string_format(msg, sizeof(msg), "Unexpected token while parsing %s", context);
         string_format(suggestion, sizeof(suggestion), "%s", get_context_suggestion(context, type));
     }
@@ -754,6 +756,8 @@ static DataType parse_data_type(ParseContext *ctx) {
         if (strcasecmp(current_token[-1].value, "TEXT") == 0)
             return TYPE_STRING;
         if (strcasecmp(current_token[-1].value, "FLOAT") == 0)
+            return TYPE_FLOAT;
+        if (strcasecmp(current_token[-1].value, "REAL") == 0)
             return TYPE_FLOAT;
         if (strcasecmp(current_token[-1].value, "DOUBLE") == 0)
             return TYPE_FLOAT;
@@ -790,71 +794,140 @@ static bool parse_column_name_and_type(ParseContext *ctx, ColumnDef *col) {
         return false;
     }
 
-    string_copy(col->name, sizeof(col->name), current_token->value);
+    strcopy(col->name, sizeof(col->name), current_token->value);
     advance();
     col->type = parse_data_type(ctx);
     col->flags = COL_FLAG_NULLABLE;
-    col->references_table[0] = '\0';
-    col->references_column[0] = '\0';
+    col->reference.table_id = 0;
+    col->reference.column_idx = 0;
     return true;
 }
 
-static bool parse_column_foreign_key_refs(ParseContext *ctx, ColumnDef *col) {
-    advance();
-    advance();
-    if (current_token->type == TOKEN_KEYWORD &&
-        strcasecmp(current_token->value, "REFERENCES") == 0) {
-        advance();
-        if (current_token->type == TOKEN_IDENTIFIER) {
-            string_copy(col->references_table, sizeof(col->references_table),
-                        current_token->value);
-            advance();
-            if (current_token->type == TOKEN_LPAREN) {
-                advance();
-                if (current_token->type == TOKEN_IDENTIFIER) {
-                    string_copy(col->references_column, sizeof(col->references_column),
-                                current_token->value);
-                    advance();
-                    if (!expect(ctx, TOKEN_RPAREN, "FOREIGN KEY REFERENCES")) {
-                        return false;
-                    }
-                } else {
-                    parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
-                                    "Expected column name in FOREIGN KEY REFERENCES", "column name",
-                                    token_type_name(current_token->type), NULL);
-                    return false;
-                }
-            }
-            col->flags |= COL_FLAG_FOREIGN_KEY;
-            log_msg(LOG_DEBUG, "parse_column_def: Column '%s' FOREIGN KEY REFERENCES %s.%s",
-                    col->name, col->references_table, col->references_column);
-        } else {
-            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
-                            "Expected table name in FOREIGN KEY REFERENCES", "table name",
-                            token_type_name(current_token->type), NULL);
-            return false;
+static int find_column_index_static(Table *table, const char *column_name) {
+    int column_count = alist_length(&table->schema.columns);
+    for (int i = 0; i < column_count; i++) {
+        ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, i);
+        if (col && strcasecmp(col->name, column_name) == 0) {
+            return i;
         }
-    } else {
+    }
+    return -1;
+}
+
+static bool parse_column_foreign_key_refs(ParseContext *ctx, ColumnDef *col) {
+    advance();  // FOREIGN
+    
+    if (current_token->type != TOKEN_KEY) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected KEY after FOREIGN", "KEY",
+                        token_type_name(current_token->type), NULL);
+        return false;
+    }
+    advance();
+
+    if (current_token->type != TOKEN_REFERENCES) {
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected REFERENCES after FOREIGN KEY",
                         "REFERENCES", token_type_name(current_token->type), NULL);
         return false;
     }
+    advance();
+
+    if (current_token->type != TOKEN_IDENTIFIER) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected table name in REFERENCES",
+                        "table name", token_type_name(current_token->type), NULL);
+        return false;
+    }
+
+    char table_name[MAX_TABLE_NAME_LEN];
+    strcopy(table_name, sizeof(table_name), current_token->value);
+    advance();
+
+    if (current_token->type != TOKEN_LPAREN) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected '(' after table name", "(",
+                        token_type_name(current_token->type), NULL);
+        return false;
+    }
+    advance();
+
+    if (current_token->type != TOKEN_IDENTIFIER) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected column name", "column name",
+                        token_type_name(current_token->type), NULL);
+        return false;
+    }
+
+    char column_name[MAX_COLUMN_NAME_LEN];
+    strcopy(column_name, sizeof(column_name), current_token->value);
+    advance();
+
+    if (current_token->type != TOKEN_RPAREN) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected ')' after column name", ")",
+                        token_type_name(current_token->type), NULL);
+        return false;
+    }
+    advance();
+
+    col->reference.table_id = find_table_id_by_name(table_name);
+    if (col->reference.table_id == 0) {
+        parse_error_set(ctx, PARSE_ERROR_TABLE_NOT_FOUND, "Referenced table not found", table_name,
+                        "existing table", NULL);
+        return false;
+    }
+
+    Table *ref_table = find_table(table_name);
+    if (!ref_table) {
+        return false;
+    }
+
+    int col_idx = find_column_index_static(ref_table, column_name);
+    if (col_idx == -1) {
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Referenced column not found",
+                        column_name, "existing column", NULL);
+        return false;
+    }
+
+    col->reference.column_idx = (uint16_t)col_idx;
+    col->flags |= COL_FLAG_FOREIGN_KEY;
+
+    log_msg(LOG_DEBUG, "Column '%s' FOREIGN KEY REFERENCES table_id=%d column_idx=%d", col->name,
+            col->reference.table_id, col->reference.column_idx);
+
     return true;
 }
 
 static bool parse_column_references(ParseContext *ctx, ColumnDef *col) {
     advance();
+
     if (current_token->type == TOKEN_IDENTIFIER) {
-        string_copy(col->references_table, sizeof(col->references_table), current_token->value);
+        char table_name[MAX_TABLE_NAME_LEN];
+        strcopy(table_name, sizeof(table_name), current_token->value);
         advance();
         if (current_token->type == TOKEN_LPAREN) {
             advance();
             if (current_token->type == TOKEN_IDENTIFIER) {
-                string_copy(col->references_column, sizeof(col->references_column),
-                            current_token->value);
+                char column_name[MAX_COLUMN_NAME_LEN];
+                strcopy(column_name, sizeof(column_name), current_token->value);
                 advance();
                 if (!expect(ctx, TOKEN_RPAREN, "REFERENCES")) {
                     return false;
+                }
+
+                // Find table_id and column_id
+                col->reference.table_id = find_table_id_by_name(table_name);
+                if (col->reference.table_id == 0) {
+                    parse_error_set(ctx, PARSE_ERROR_TABLE_NOT_FOUND, "Referenced table not found",
+                                    table_name, "existing table", NULL);
+                    return false;
+                }
+
+                Table *ref_table = find_table(table_name);
+                if (ref_table) {
+                    int col_idx = find_column_index_static(ref_table, column_name);
+                    if (col_idx == -1) {
+                        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                                        "Referenced column not found", column_name,
+                                        "existing column", NULL);
+                        return false;
+                    }
+                    col->reference.column_idx = (uint16_t)col_idx;
                 }
             } else {
                 parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
@@ -864,8 +937,8 @@ static bool parse_column_references(ParseContext *ctx, ColumnDef *col) {
             }
         }
         col->flags |= COL_FLAG_FOREIGN_KEY;
-        log_msg(LOG_DEBUG, "parse_column_def: Column '%s' REFERENCES %s.%s", col->name,
-                col->references_table, col->references_column);
+        log_msg(LOG_DEBUG, "parse_column_def: Column '%s' REFERENCES table_id=%d column_idx=%d",
+                col->name, col->reference.table_id, col->reference.column_idx);
     } else {
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected table name in REFERENCES",
                         "table name", token_type_name(current_token->type), NULL);
@@ -932,18 +1005,17 @@ static ASTNode *parse_create_table(ParseContext *ctx) {
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                        "Memory allocation failed for CREATE TABLE node", "memory", "NULL",
-                        "Try again or reduce query complexity");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for CREATE TABLE node",
+                        "memory", "NULL", "Try again or reduce query complexity");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_CREATE_TABLE;
     node->next = NULL;
 
-    string_copy(node->create_table.table_name, sizeof(node->create_table.table_name),
-                current_token[-1].value);
+    strcopy(node->create_table.table_name, sizeof(node->create_table.table_name),
+            current_token[-1].value);
 
     log_msg(LOG_DEBUG, "parse_create_table: Table name = '%s'", node->create_table.table_name);
 
@@ -959,7 +1031,7 @@ static ASTNode *parse_create_table(ParseContext *ctx) {
     while (!match(TOKEN_RPAREN)) {
         ColumnDef *col = (ColumnDef *)alist_append(&node->create_table.columns);
         if (!col) {
-            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for columns",
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for columns",
                             "memory", "NULL", NULL);
             free_ast(node);
             return NULL;
@@ -1001,7 +1073,7 @@ static Value parse_value(ParseContext *ctx) {
         log_msg(LOG_DEBUG, "parse_value: Parsing string value '%s'", current_token->value);
         val.type = TYPE_STRING;
         val.char_val = malloc(strlen(current_token->value) + 1);
-        string_copy(val.char_val, strlen(current_token->value) + 1, current_token->value);
+        strcopy(val.char_val, strlen(current_token->value) + 1, current_token->value);
         advance();
         return val;
     } else if (match(TOKEN_NUMBER)) {
@@ -1086,7 +1158,7 @@ static Value parse_value(ParseContext *ctx) {
     log_msg(LOG_WARN, "parse_value: Unknown value type, defaulting to empty string");
     val.type = TYPE_STRING;
     val.char_val = malloc(1);
-    string_copy(val.char_val, 1, "");
+    strcopy(val.char_val, 1, "");
     return val;
 }
 
@@ -1095,13 +1167,12 @@ static Expr *parse_aggregate_func(ParseContext *ctx) {
 
     Expr *expr = malloc(sizeof(Expr));
     if (!expr) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                        "Memory allocation failed for aggregate function", "expression", "NULL",
-                        "Try again or simplify your query");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for aggregate function",
+                        "expression", "NULL", "Try again or simplify your query");
         return NULL;
     }
 
-    memory_clear(expr, sizeof(Expr));
+    memclear(expr, sizeof(Expr));
     expr->type = EXPR_AGGREGATE_FUNC;
 
     if (strcasecmp(current_token->value, "COUNT") == 0) {
@@ -1170,13 +1241,12 @@ static Expr *parse_aggregate_func(ParseContext *ctx) {
 static Expr *parse_scalar_func(ParseContext *ctx) {
     Expr *expr = malloc(sizeof(Expr));
     if (!expr) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                        "Memory allocation failed for scalar function", "expression", "NULL",
-                        "Try again or simplify your query");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for scalar function",
+                        "expression", "NULL", "Try again or simplify your query");
         return NULL;
     }
 
-    memory_clear(expr, sizeof(Expr));
+    memclear(expr, sizeof(Expr));
     expr->type = EXPR_SCALAR_FUNC;
 
     if (strcasecmp(current_token->value, "ABS") == 0) {
@@ -1275,8 +1345,7 @@ static void parse_literal_value(Expr *expr) {
     } else if (match(TOKEN_STRING)) {
         expr->value.type = TYPE_STRING;
         expr->value.char_val = malloc(strlen(current_token->value) + 1);
-        string_copy(expr->value.char_val, strlen(current_token->value) + 1,
-                    current_token->value);
+        strcopy(expr->value.char_val, strlen(current_token->value) + 1, current_token->value);
     } else {
         if (strchr(current_token->value, '.')) {
             expr->value.type = TYPE_FLOAT;
@@ -1311,9 +1380,8 @@ static Expr *parse_parenthesized_expr(ParseContext *ctx) {
 static Expr *parse_primary(ParseContext *ctx) {
     Expr *expr = malloc(sizeof(Expr));
     if (!expr) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                        "Memory allocation failed for primary expression", "expression", "NULL",
-                        "Try again or simplify your query");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for primary expression",
+                        "expression", "NULL", "Try again or simplify your query");
         return NULL;
     }
 
@@ -1322,7 +1390,7 @@ static Expr *parse_primary(ParseContext *ctx) {
     if (match(TOKEN_IDENTIFIER)) {
         log_msg(LOG_DEBUG, "parse_primary: Parsing identifier '%s'", current_token->value);
         expr->type = EXPR_COLUMN;
-        string_copy(expr->column_name, sizeof(expr->column_name), current_token->value);
+        strcopy(expr->column_name, sizeof(expr->column_name), current_token->value);
         advance();
     } else if (match(TOKEN_STRING) || match(TOKEN_NUMBER) || match(TOKEN_DATE) ||
                match(TOKEN_TIME)) {
@@ -1331,7 +1399,7 @@ static Expr *parse_primary(ParseContext *ctx) {
         log_msg(LOG_DEBUG, "parse_primary: Parsing NULL keyword");
         expr->type = EXPR_VALUE;
         expr->value.char_val = malloc(5);
-        string_copy(expr->value.char_val, strlen("NULL") + 1, "NULL");
+        strcopy(expr->value.char_val, strlen("NULL") + 1, "NULL");
         advance();
     } else if (match(TOKEN_AGGREGATE_FUNC)) {
         free_expr(expr);
@@ -1348,7 +1416,7 @@ static Expr *parse_primary(ParseContext *ctx) {
 
         char expected[256];
         string_format(expected, sizeof(expected),
-                 "identifier, string, number, date, time, NULL, or aggregate function");
+                      "identifier, string, number, date, time, NULL, or aggregate function");
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected a value or column name",
                         expected,
                         current_token->type == TOKEN_EOF ? "end of input"
@@ -1365,10 +1433,10 @@ static Expr *parse_unary_expr(ParseContext *ctx) {
         log_msg(LOG_DEBUG, "parse_unary_expr: Parsing NOT expression");
         Expr *expr = malloc(sizeof(Expr));
         if (!expr) {
-            log_msg(LOG_ERROR, "parse_unary_expr: Memory allocation failed");
+            log_msg(LOG_ERROR, "parse_unary_expr: malloc() failed");
             return NULL;
         }
-        memory_clear(expr, sizeof(Expr));
+        memclear(expr, sizeof(Expr));
         expr->type = EXPR_UNARY_OP;
         expr->unary.op = OP_NOT;
         advance();
@@ -1384,10 +1452,10 @@ static Expr *parse_unary_expr(ParseContext *ctx) {
         log_msg(LOG_DEBUG, "parse_unary_expr: Parsing EXISTS expression");
         Expr *expr = malloc(sizeof(Expr));
         if (!expr) {
-            log_msg(LOG_ERROR, "parse_unary_expr: Memory allocation failed");
+            log_msg(LOG_ERROR, "parse_unary_expr: malloc() failed");
             return NULL;
         }
-        memory_clear(expr, sizeof(Expr));
+        memclear(expr, sizeof(Expr));
         expr->type = EXPR_SUBQUERY;
         advance();
         if (!expect(ctx, TOKEN_LPAREN, "EXISTS")) {
@@ -1446,7 +1514,7 @@ static Expr *parse_subquery(ParseContext *ctx) {
 
     Expr *expr = malloc(sizeof(Expr));
     if (!expr) {
-        log_msg(LOG_ERROR, "parse_subquery: Memory allocation failed");
+        log_msg(LOG_ERROR, "parse_subquery: malloc() failed");
         free_ast(subquery_ast);
         return NULL;
     }
@@ -1641,7 +1709,7 @@ static Table *parse_insert_table_and_columns(ParseContext *ctx, ASTNode *node,
 
                 while (current_token->type == TOKEN_IDENTIFIER) {
                     char col_name[MAX_COLUMN_NAME_LEN];
-                    string_copy(col_name, sizeof(col_name), current_token->value);
+                    strcopy(col_name, sizeof(col_name), current_token->value);
 
                     int col_idx = -1;
                     if (table) {
@@ -1745,8 +1813,8 @@ static bool parse_insert_value_rows(ParseContext *ctx, ASTNode *node, bool has_c
 
         ArrayList *value_row = (ArrayList *)alist_append(&node->insert.value_rows);
         if (!value_row) {
-            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                            "Memory allocation failed for value row", "memory", "NULL", NULL);
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for value row",
+                            "memory", "NULL", NULL);
             return false;
         }
         alist_init(value_row, sizeof(ColumnValue), free_column_value);
@@ -1755,8 +1823,8 @@ static bool parse_insert_value_rows(ParseContext *ctx, ASTNode *node, bool has_c
         while (current_token->type != TOKEN_RPAREN) {
             ColumnValue *cv = (ColumnValue *)alist_append(value_row);
             if (!cv) {
-                parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                                "Memory allocation failed for values", "memory", "NULL", NULL);
+                parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for values",
+                                "memory", "NULL", NULL);
                 return false;
             }
 
@@ -1765,7 +1833,7 @@ static bool parse_insert_value_rows(ParseContext *ctx, ASTNode *node, bool has_c
                 if (col_idx && *col_idx >= 0 && table) {
                     ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, *col_idx);
                     if (col) {
-                        string_copy(cv->column_name, sizeof(cv->column_name), col->name);
+                        strcopy(cv->column_name, sizeof(cv->column_name), col->name);
                     } else {
                         cv->column_name[0] = '\0';
                     }
@@ -1805,12 +1873,12 @@ static ASTNode *parse_insert(ParseContext *ctx) {
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for INSERT node",
-                        "node", "NULL", "Try again");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for INSERT node", "node",
+                        "NULL", "Try again");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_INSERT_ROW;
     node->next = NULL;
 
@@ -1858,12 +1926,12 @@ static bool parse_select_columns(ParseContext *ctx, ASTNode *node) {
             star_expr->value.type = TYPE_STRING;
             star_expr->alias[0] = '\0';
             star_expr->value.char_val = malloc(2);
-            string_copy(star_expr->value.char_val, strlen("*") + 1, "*");
+            strcopy(star_expr->value.char_val, strlen("*") + 1, "*");
         }
         if (match(TOKEN_AS)) {
             advance();
             if (match(TOKEN_IDENTIFIER) && current_token) {
-                string_copy(star_expr->alias, sizeof(star_expr->alias), current_token->value);
+                strcopy(star_expr->alias, sizeof(star_expr->alias), current_token->value);
                 advance();
             }
         }
@@ -1892,7 +1960,7 @@ static bool parse_select_columns(ParseContext *ctx, ASTNode *node) {
                     (match(TOKEN_KEYWORD) && strcasecmp(current_token->value, "AS") == 0)) {
                     advance();
                     if (match(TOKEN_IDENTIFIER)) {
-                        string_copy(expr->alias, sizeof(expr->alias), current_token->value);
+                        strcopy(expr->alias, sizeof(expr->alias), current_token->value);
                         advance();
                     }
                 }
@@ -2027,8 +2095,8 @@ static bool parse_select_join_clause(ParseContext *ctx, ASTNode *node) {
             return false;
         }
         node->select.join_table_id = join_table->table_id;
-        string_copy(node->select.join_table_name, sizeof(node->select.join_table_name),
-                    join_table_name);
+        strcopy(node->select.join_table_name, sizeof(node->select.join_table_name),
+                join_table_name);
         advance();
 
         if (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "ON") != 0) {
@@ -2125,12 +2193,12 @@ static bool parse_select_limit(ParseContext *ctx, ASTNode *node) {
 static ASTNode *parse_select(ParseContext *ctx) {
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for SELECT node",
-                        "node", "NULL", "Try again");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for SELECT node", "node",
+                        "NULL", "Try again");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_SELECT;
     node->next = NULL;
 
@@ -2181,13 +2249,12 @@ static ASTNode *parse_drop_table(ParseContext *ctx) {
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                        "Memory allocation failed for DROP TABLE node", "node", "NULL",
-                        "Try again");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for DROP TABLE node",
+                        "node", "NULL", "Try again");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_DROP_TABLE;
     node->next = NULL;
 
@@ -2246,12 +2313,12 @@ static bool parse_update_assignments(ParseContext *ctx, ASTNode *node, Table *ta
 
         ColumnValue *cv = (ColumnValue *)alist_append(&node->update.values);
         if (!cv) {
-            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for values",
-                            "memory", "NULL", NULL);
+            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for values", "memory",
+                            "NULL", NULL);
             return false;
         }
 
-        string_copy(cv->column_name, sizeof(cv->column_name), current_token->value);
+        strcopy(cv->column_name, sizeof(cv->column_name), current_token->value);
 
         cv->column_idx = -1;
         if (table) {
@@ -2289,12 +2356,12 @@ static ASTNode *parse_update(ParseContext *ctx) {
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for UPDATE node",
-                        "node", "NULL", "Try again");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for UPDATE node", "node",
+                        "NULL", "Try again");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_UPDATE_ROW;
     node->next = NULL;
 
@@ -2343,12 +2410,12 @@ static ASTNode *parse_delete(ParseContext *ctx) {
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "Memory allocation failed for DELETE node",
-                        "node", "NULL", "Try again");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for DELETE node", "node",
+                        "NULL", "Try again");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_DELETE_ROW;
     node->next = NULL;
 
@@ -2385,18 +2452,17 @@ static ASTNode *parse_index_name_and_allocate(ParseContext *ctx) {
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                        "Memory allocation failed for CREATE INDEX node", "memory", "NULL",
-                        "Try again or reduce query complexity");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for CREATE INDEX node",
+                        "memory", "NULL", "Try again or reduce query complexity");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_CREATE_INDEX;
     node->next = NULL;
 
-    string_copy(node->create_index.index_name, sizeof(node->create_index.index_name),
-                current_token->value);
+    strcopy(node->create_index.index_name, sizeof(node->create_index.index_name),
+            current_token->value);
 
     log_msg(LOG_DEBUG, "parse_create_index: Index name = '%s'", node->create_index.index_name);
     advance();
@@ -2447,7 +2513,7 @@ static bool parse_column_for_index(ParseContext *ctx, ASTNode *node, Table *tabl
     }
 
     char column_name[MAX_COLUMN_NAME_LEN];
-    string_copy(column_name, sizeof(column_name), current_token->value);
+    strcopy(column_name, sizeof(column_name), current_token->value);
 
     log_msg(LOG_DEBUG, "parse_create_index: Column name = '%s'", column_name);
     advance();
@@ -2507,18 +2573,16 @@ static ASTNode *parse_drop_index(ParseContext *ctx) {
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
-        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX,
-                        "Memory allocation failed for DROP INDEX node", "memory", "NULL",
-                        "Try again or reduce query complexity");
+        parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for DROP INDEX node",
+                        "memory", "NULL", "Try again or reduce query complexity");
         return NULL;
     }
 
-    memory_clear(node, sizeof(ASTNode));
+    memclear(node, sizeof(ASTNode));
     node->type = AST_DROP_INDEX;
     node->next = NULL;
 
-    string_copy(node->drop_index.index_name, sizeof(node->drop_index.index_name),
-                current_token->value);
+    strcopy(node->drop_index.index_name, sizeof(node->drop_index.index_name), current_token->value);
 
     log_msg(LOG_DEBUG, "parse_drop_index: Index name = '%s'", node->drop_index.index_name);
     advance();
@@ -2737,8 +2801,8 @@ static bool parse_date_literal(const char *value, int *year, int *month, int *da
             return false;
         }
     }
-    *year = (value[0] - '0') * 1000 + (value[1] - '0') * 100 + (value[2] - '0') * 10 +
-            (value[3] - '0');
+    *year =
+        (value[0] - '0') * 1000 + (value[1] - '0') * 100 + (value[2] - '0') * 10 + (value[3] - '0');
     *month = (value[5] - '0') * 10 + (value[6] - '0');
     *day = (value[8] - '0') * 10 + (value[9] - '0');
     if (*month < 1 || *month > 12 || *day < 1 || *day > 31) {
@@ -2764,8 +2828,7 @@ static bool parse_time_literal(const char *value, int *hour, int *minute, int *s
     *hour = (value[0] - '0') * 10 + (value[1] - '0');
     *minute = (value[3] - '0') * 10 + (value[4] - '0');
     *second = (value[6] - '0') * 10 + (value[7] - '0');
-    if (*hour < 0 || *hour > 23 || *minute < 0 || *minute > 59 || *second < 0 ||
-        *second > 59) {
+    if (*hour < 0 || *hour > 23 || *minute < 0 || *minute > 59 || *second < 0 || *second > 59) {
         return false;
     }
     return true;

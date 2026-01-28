@@ -3,9 +3,7 @@
 #include <string.h>
 
 #include "db.h"
-#include "logger.h"
 #include "table.h"
-#include "values.h"
 
 #define BTREE_DEFAULT_ORDER 4
 

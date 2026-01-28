@@ -8,6 +8,7 @@ void test_create_table_new_types(void);
 void test_foreign_key_validation(void);
 void test_foreign_key_self_reference(void);
 void test_foreign_key_multiple_references(void);
+void test_primary_key_definitions(void);
 
 void test_insert_single_row(void);
 void test_insert_multiple_values(void);
@@ -114,6 +115,7 @@ void test_btree_basic(void);
 void test_query_stats_basic(void);
 void test_aggregation_improved(void);
 void test_new_features_simple(void);
+void test_real_type_and_comments(void);
 void test_btree_basic(void);
 void test_query_stats_basic(void);
 void test_aggregation_improved(void);
@@ -147,6 +149,8 @@ int main(void) {
     test_delete_multiple_rows();
     test_delete_all_rows();
     test_insert_with_comments();
+    test_real_type_and_comments();
+    test_primary_key_definitions();
     test_multiple_statements();
     test_update_with_expression();
     test_update_multiple_columns();

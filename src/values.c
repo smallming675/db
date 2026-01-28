@@ -47,7 +47,7 @@ const char *repr(const Value *val) {
     static char buffer[MAX_STRING_LEN];
 
     if (!val || is_null(val)) {
-        string_copy(buffer, sizeof(buffer), "NULL");
+        strcopy(buffer, sizeof(buffer), "NULL");
         return buffer;
     }
 
@@ -59,7 +59,7 @@ const char *repr(const Value *val) {
         string_format(buffer, sizeof(buffer), "%.2f", val->float_val);
         break;
     case TYPE_BOOLEAN:
-        string_copy(buffer, sizeof(buffer), val->bool_val ? "TRUE" : "FALSE");
+        strcopy(buffer, sizeof(buffer), val->bool_val ? "TRUE" : "FALSE");
         break;
     case TYPE_DECIMAL: {
         int scale = val->decimal_val.scale > 0 ? val->decimal_val.scale : 2;
@@ -71,7 +71,7 @@ const char *repr(const Value *val) {
         string_format(buffer, sizeof(buffer), "<BLOB:%zu bytes>", val->blob_val.length);
         break;
     case TYPE_STRING:
-        string_copy(buffer, sizeof(buffer), val->char_val);
+        strcopy(buffer, sizeof(buffer), val->char_val);
         break;
     case TYPE_TIME:
         string_format(buffer, sizeof(buffer), "%02d:%02d:%02d", time_hour(val->time_val),
@@ -82,14 +82,22 @@ const char *repr(const Value *val) {
                       date_month(val->date_val), date_day(val->date_val));
         break;
     case TYPE_ERROR:
-        string_copy(buffer, sizeof(buffer), "ERROR");
+        strcopy(buffer, sizeof(buffer), "ERROR");
         break;
     default:
-        string_copy(buffer, sizeof(buffer), "UNKNOWN");
+        strcopy(buffer, sizeof(buffer), "UNKNOWN");
         break;
     }
 
     return buffer;
+}
+
+static int compare_numeric(double left_val, double right_val) {
+    if (left_val < right_val)
+        return -1;
+    if (left_val > right_val)
+        return 1;
+    return 0;
 }
 
 /* returns -1/0/1 for ordering */
@@ -98,29 +106,34 @@ static int compare_values_local(const Value *left, const Value *right) {
         return 0;
 
     if (left->type == TYPE_INT && right->type == TYPE_INT) {
-        return left->int_val < right->int_val ? -1 : (left->int_val > right->int_val ? 1 : 0);
-    } else if (left->type == TYPE_FLOAT && right->type == TYPE_FLOAT) {
-        float left_val = left->float_val;
-        float right_val = right->float_val;
-        if (left_val < right_val)
+        if (left->int_val < right->int_val)
             return -1;
-        if (left_val > right_val)
+        if (left->int_val > right->int_val)
             return 1;
         return 0;
-    } else if (left->type == TYPE_INT && right->type == TYPE_FLOAT) {
-        int left_val = left->int_val;
-        float right_val = right->float_val;
-        if (left_val < right_val)
+    }
+
+    bool left_is_numeric = (left->type == TYPE_FLOAT || left->type == TYPE_DECIMAL);
+    bool right_is_numeric = (right->type == TYPE_FLOAT || right->type == TYPE_DECIMAL);
+
+    if (left_is_numeric && right_is_numeric) {
+        return compare_numeric((double)left->float_val, (double)right->float_val);
+    }
+
+    if (left->type == TYPE_INT && right_is_numeric) {
+        double right_val = (double)right->float_val;
+        if (left->int_val < right_val)
             return -1;
-        if (left_val > right_val)
+        if (left->int_val > right_val)
             return 1;
         return 0;
-    } else if (left->type == TYPE_FLOAT && right->type == TYPE_INT) {
-        float left_val = left->float_val;
-        int right_val = right->int_val;
-        if (left_val < right_val)
+    }
+
+    if (left_is_numeric && right->type == TYPE_INT) {
+        double left_val = (double)left->float_val;
+        if (left_val < right->int_val)
             return -1;
-        if (left_val > right_val)
+        if (left_val > right->int_val)
             return 1;
         return 0;
     }

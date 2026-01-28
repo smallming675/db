@@ -8,7 +8,7 @@ void test_table_stats_functionality(void) {
     log_msg(LOG_INFO, "Testing TableStats functionality...");
 
     TableStats stats;
-    string_copy(stats.table_name, sizeof(stats.table_name), "test_table");
+    strcopy(stats.table_name, sizeof(stats.table_name), "test_table");
     stats.total_rows = 1000;
     stats.has_stats = true;
 
@@ -45,7 +45,7 @@ void test_plan_node_structures(void) {
     log_msg(LOG_INFO, "Testing PlanNode structures...");
 
     SeqScanPlan seq_plan;
-    string_copy(seq_plan.table_name, sizeof(seq_plan.table_name), "users");
+    strcopy(seq_plan.table_name, sizeof(seq_plan.table_name), "users");
     seq_plan.table_id = 1;
     seq_plan.where_clause = NULL;
 
@@ -54,7 +54,7 @@ void test_plan_node_structures(void) {
     assert(seq_plan.where_clause == NULL);
 
     IndexScanPlan idx_plan;
-    string_copy(idx_plan.table_name, sizeof(idx_plan.table_name), "orders");
+    strcopy(idx_plan.table_name, sizeof(idx_plan.table_name), "orders");
     idx_plan.table_id = 2;
     idx_plan.index = NULL;
     idx_plan.where_clause = NULL;

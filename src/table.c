@@ -59,12 +59,12 @@ Value copy_value(const Value *src) {
     if (src->type == TYPE_STRING && src->char_val != NULL) {
         dst.char_val = malloc(strlen(src->char_val) + 1);
         if (dst.char_val) {
-            string_copy(dst.char_val, strlen(src->char_val) + 1, src->char_val);
+            strcopy(dst.char_val, strlen(src->char_val) + 1, src->char_val);
         }
     } else if (src->type == TYPE_BLOB && src->blob_val.data != NULL && src->blob_val.length > 0) {
         dst.blob_val.data = malloc(src->blob_val.length);
         if (dst.blob_val.data) {
-            memory_copy(dst.blob_val.data, src->blob_val.data, src->blob_val.length);
+            memcopy(dst.blob_val.data, src->blob_val.data, src->blob_val.length);
         }
     }
     return dst;
@@ -344,7 +344,7 @@ static int find_column_index(Table *table, const char *column_name) {
 static void create_index_name(const char *table_name, const char *column_name,
                               const char *index_name, char *result, size_t result_size) {
     if (index_name && index_name[0] != '\0') {
-        string_copy(result, result_size, index_name);
+        strcopy(result, result_size, index_name);
     } else {
         string_format(result, result_size, "idx_%s_%s", table_name, column_name);
     }
@@ -369,10 +369,10 @@ static Index *create_and_init_index(const char *idx_name, const char *table_name
         return NULL;
     }
 
-    memory_clear(index, sizeof(Index));
-    string_copy(index->index_name, sizeof(index->index_name), idx_name);
-    string_copy(index->table_name, sizeof(index->table_name), table_name);
-    string_copy(index->column_name, sizeof(index->column_name), column_name);
+    memclear(index, sizeof(Index));
+    strcopy(index->index_name, sizeof(index->index_name), idx_name);
+    strcopy(index->table_name, sizeof(index->table_name), table_name);
+    strcopy(index->column_name, sizeof(index->column_name), column_name);
     index->bucket_count = 64;
     index->buckets = calloc(index->bucket_count, sizeof(IndexEntry *));
     index->entry_count = 0;
@@ -445,9 +445,9 @@ void index_table_column(const char *table_name, const char *column_name, const c
     stored->bucket_count = index->bucket_count;
     stored->buckets = index->buckets;
     stored->entry_count = index->entry_count;
-    string_copy(stored->index_name, sizeof(stored->index_name), index->index_name);
-    string_copy(stored->table_name, sizeof(stored->table_name), index->table_name);
-    string_copy(stored->column_name, sizeof(stored->column_name), index->column_name);
+    strcopy(stored->index_name, sizeof(stored->index_name), index->index_name);
+    strcopy(stored->table_name, sizeof(stored->table_name), index->table_name);
+    strcopy(stored->column_name, sizeof(stored->column_name), index->column_name);
 
     log_msg(LOG_INFO, "index_table_column: Created index '%s' on '%s.%s' with %d entries",
             index_name, table_name, column_name, index->entry_count);

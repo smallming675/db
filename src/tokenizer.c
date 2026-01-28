@@ -47,6 +47,7 @@ static const KeywordMap keywords[] = {{"CREATE", TOKEN_KEYWORD},
                                       {"BOOL", TOKEN_KEYWORD},
                                       {"DECIMAL", TOKEN_KEYWORD},
                                       {"NUMERIC", TOKEN_KEYWORD},
+                                      {"REAL", TOKEN_KEYWORD},
                                       {"BLOB", TOKEN_KEYWORD},
                                       {"AND", TOKEN_AND},
                                       {"OR", TOKEN_OR},
@@ -109,7 +110,7 @@ static TokenType lookup_keyword(const char *str) {
 static void add_token(ArrayList *tokens, TokenType type, const char *value) {
     Token *token = (Token *)alist_append(tokens);
     token->type = type;
-    string_copy(token->value, sizeof(token->value), value);
+    strcopy(token->value, sizeof(token->value), value);
 }
 
 static int tokenize_string(const char *input, int i, ArrayList *tokens) {
@@ -279,6 +280,14 @@ Token *tokenize(const char *input) {
             while (i < len && input[i] != '\n' && input[i] != '\r') {
                 i++;
             }
+        } else if (input[i] == '/' && input[i + 1] == '*') {
+            i += 2;
+            while (i < len && !(input[i] == '*' && input[i + 1] == '/')) {
+                i++;
+            }
+            if (i < len && input[i] == '*' && input[i + 1] == '/') {
+                i += 2;
+            }
         } else if (input[i] == '-' &&
                    (isdigit(input[i + 1]) || (input[i + 1] == '.' && isdigit(input[i + 2])))) {
             char neg_value[32];
@@ -297,7 +306,7 @@ Token *tokenize(const char *input) {
             neg_value[j] = '\0';
 
             Token *token = (Token *)alist_append(&tokens);
-            string_copy(token->value, sizeof(token->value), neg_value);
+            strcopy(token->value, sizeof(token->value), neg_value);
             token->type = TOKEN_NUMBER;
         } else if (isdigit(input[i]) || (input[i] == '.' && isdigit(input[i + 1]))) {
             i = tokenize_number(input, i, &tokens);

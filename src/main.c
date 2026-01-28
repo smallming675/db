@@ -17,29 +17,6 @@ static void print_usage(void) {
     printf("  --help, -h     Show this help message\n");
 }
 
-static void parse_command_line_args(int argc, char *argv[], bool *show_logs) {
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--show-logs") == 0) {
-            *show_logs = true;
-        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            print_usage();
-            exit(0);
-        }
-    }
-}
-
-static void init_repl_session(bool show_logs) {
-    if (show_logs) {
-        set_log_level(LOG_DEBUG);
-    } else {
-        set_log_level(LOG_NONE);
-    }
-
-    printf("Simple Database System\n");
-    printf("Type '.help;' for usage, '.exit;' to quit\n\n");
-    log_msg(LOG_INFO, "Database system started");
-}
-
 static bool read_input_line(char *input, size_t input_size) {
     printf("db> ");
     fflush(stdout);
@@ -49,17 +26,22 @@ static bool read_input_line(char *input, size_t input_size) {
     bool has_content = false;
 
     while (fgets(line, sizeof(line), stdin)) {
-        line[strcspn(line, "\r\n")] = '\0';
+        size_t line_len = strlen(line);
+        if (line_len > 0 && (line[line_len - 1] == '\n' || line[line_len - 1] == '\r')) {
+            line_len--;
+        }
 
         if (!has_content) {
-            string_copy(input, input_size, line);
+            strcopy(input, input_size, line);
+            input[line_len] = '\0';
             has_content = true;
         } else {
-            if (strlen(input) + strlen(line) + 2 < input_size) {
+            if (strlen(input) + line_len + 2 < input_size) {
                 size_t input_len = strlen(input);
-                string_copy(input + input_len, input_size - input_len, " ");
+                strcopy(input + input_len, input_size - input_len, "\n");
                 input_len = strlen(input);
-                string_copy(input + input_len, input_size - input_len, line);
+                strcopy(input + input_len, input_size - input_len, line);
+                input[input_len + line_len] = '\0';
             }
         }
 
@@ -67,6 +49,7 @@ static bool read_input_line(char *input, size_t input_size) {
             break;
         }
 
+        printf("... ");
         fflush(stdout);
     }
 
@@ -75,7 +58,6 @@ static bool read_input_line(char *input, size_t input_size) {
         return false;
     }
 
-    input[strcspn(input, "\r\n")] = '\0';
     return true;
 }
 
@@ -114,7 +96,7 @@ static bool handle_meta_command(const char *command) {
     return false;
 }
 
-static void process_single_statement(const char *trimmed_stmt) {
+static void process_statement(const char *trimmed_stmt) {
     if (strcmp(trimmed_stmt, ".LIST") == 0) {
         extern ArrayList tables;
         int table_count = alist_length(&tables);
@@ -164,18 +146,37 @@ static void process_single_statement(const char *trimmed_stmt) {
     free_tokens(tokens);
 }
 
-static void cleanup_repl_session(void) {
-    log_msg(LOG_INFO, "Database system shutting down");
-    alist_destroy(&tables);
-    printf("\nGoodbye!\n");
-}
-
 int main(int argc, char *argv[]) {
     bool show_logs = false;
 
     init_tables();
-    parse_command_line_args(argc, argv, &show_logs);
-    init_repl_session(show_logs);
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-c") == 0) {
+            if (i + 1 >= argc) {
+                printf("<Usage> db -c <sql statment>\n");
+                return 1;
+            }
+
+            process_statement(argv[i + 1]);
+            alist_destroy(&tables);
+            return 0;
+
+        } else if (strcmp(argv[i], "--show-logs") == 0) {
+            show_logs = true;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_usage();
+            exit(0);
+        }
+    }
+    if (show_logs) {
+        set_log_level(LOG_DEBUG);
+    } else {
+        set_log_level(LOG_NONE);
+    }
+
+    printf("Simple Database System\n");
+    printf("Type '.help;' for usage, '.exit;' to quit\n\n");
+    log_msg(LOG_INFO, "Database system started");
 
     char input[8192];
     while (read_input_line(input, sizeof(input))) {
@@ -183,50 +184,29 @@ int main(int argc, char *argv[]) {
             continue;
 
         log_msg(LOG_DEBUG, "Processing command: '%s'", input);
+        log_msg(LOG_DEBUG, "Input length: %zu", strlen(input));
+        log_msg(LOG_DEBUG, "Input with brackets: '%s'", input);
 
         if (handle_meta_command(input)) {
             break;
         }
 
         if (input[0] != '.') {
-            size_t input_len = strlen(input);
-            char *input_copy = malloc(input_len + 1);
-            if (!input_copy) {
-                log_msg(LOG_ERROR, "Memory allocation failed");
-                continue;
+            char *trimmed = input;
+            while (*trimmed == ' ' || *trimmed == '\t')
+                trimmed++;
+            char *end = trimmed + strlen(trimmed) - 1;
+            while (end > trimmed && (*end == ' ' || *end == '\t'))
+                end--;
+            *(end + 1) = '\0';
+
+            if (*trimmed != '\0') {
+                process_statement(trimmed);
             }
-            string_copy(input_copy, input_len + 1, input);
-
-            char *stmt = input_copy;
-            while (true) {
-                char *semicolon_pos = strchr(stmt, ';');
-                if (semicolon_pos) {
-                    *semicolon_pos = '\0';
-                }
-
-                char *trimmed = stmt;
-                while (*trimmed == ' ' || *trimmed == '\t')
-                    trimmed++;
-                char *end = trimmed + strlen(trimmed) - 1;
-                while (end > trimmed && (*end == ' ' || *end == '\t'))
-                    end--;
-                *(end + 1) = '\0';
-
-                if (*trimmed != '\0') {
-                    process_single_statement(trimmed);
-                }
-
-                if (semicolon_pos) {
-                    stmt = semicolon_pos + 1;
-                } else {
-                    break;
-                }
-            }
-
-            free(input_copy);
         }
     }
-
-    cleanup_repl_session();
+    log_msg(LOG_INFO, "Database system shutting down");
+    alist_destroy(&tables);
+    printf("\nGoodbye!\n");
     return 0;
 }

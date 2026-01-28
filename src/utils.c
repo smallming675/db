@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static size_t string_strnlen(const char *value, size_t max_len) {
+static size_t strlength(const char *value, size_t max_len) {
     if (!value) {
         return 0;
     }
@@ -14,8 +14,7 @@ static size_t string_strnlen(const char *value, size_t max_len) {
     return len;
 }
 
-// Safe version of strcpy that respects null termination and string lengths
-size_t string_copy(char *dest, size_t dest_size, const char *src) {
+size_t strcopy(char *dest, size_t dest_size, const char *src) {
     if (!dest || dest_size == 0) {
         return 0;
     }
@@ -38,12 +37,12 @@ size_t string_copy(char *dest, size_t dest_size, const char *src) {
     return copy_len;
 }
 
-size_t string_append(char *dest, size_t dest_size, const char *src) {
+size_t str_append(char *dest, size_t dest_size, const char *src) {
     if (!dest || dest_size == 0) {
         return 0;
     }
 
-    size_t dest_len = string_strnlen(dest, dest_size);
+    size_t dest_len = strlength(dest, dest_size);
     if (dest_len >= dest_size) {
         dest_len = dest_size - 1;
         dest[dest_len] = '\0';
@@ -90,7 +89,7 @@ int string_format(char *dest, size_t dest_size, const char *fmt, ...) {
     return written;
 }
 
-void memory_clear(void *dest, size_t size) {
+void memclear(void *dest, size_t size) {
     if (!dest || size == 0) {
         return;
     }
@@ -98,7 +97,7 @@ void memory_clear(void *dest, size_t size) {
     memset(dest, 0, size);
 }
 
-void memory_copy(void *dest, const void *src, size_t size) {
+void memcopy(void *dest, const void *src, size_t size) {
     if (!dest || !src || size == 0) {
         return;
     }

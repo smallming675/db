@@ -1,12 +1,14 @@
 #include "db.h"
 #include "table.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "logger.h"
 #include "utils.h"
+
+static TableStats g_stats[MAX_TABLES];
+static int g_stats_count = 0;
 
 static double estimate_seq_scan_cost(const char *table_name) {
     TableStats *stats = get_table_stats(table_name);
@@ -62,7 +64,7 @@ PlanNode *create_seq_scan_plan(const char *table_name, Expr *where_clause) {
     plan->left = NULL;
     plan->right = NULL;
 
-    string_copy(plan->plan.seq_scan.table_name, sizeof(plan->plan.seq_scan.table_name), table_name);
+    strcopy(plan->plan.seq_scan.table_name, sizeof(plan->plan.seq_scan.table_name), table_name);
 
     plan->plan.seq_scan.where_clause = where_clause;
     plan->plan.seq_scan.table_id = find_table_id_by_name(table_name);
@@ -85,8 +87,7 @@ static PlanNode *create_index_scan_plan(const char *table_name, Index *index, Ex
     plan->left = NULL;
     plan->right = NULL;
 
-    string_copy(plan->plan.index_scan.table_name, sizeof(plan->plan.index_scan.table_name),
-                table_name);
+    strcopy(plan->plan.index_scan.table_name, sizeof(plan->plan.index_scan.table_name), table_name);
 
     plan->plan.index_scan.index = index;
     plan->plan.index_scan.where_clause = where_clause;
@@ -138,7 +139,7 @@ static bool is_simple_indexable_predicate(Expr *expr, char *table_name,
     if (expr->type == EXPR_BINARY_OP) {
         if (expr->binary.left->type == EXPR_COLUMN &&
             (expr->binary.right->type == EXPR_VALUE || expr->binary.right->type == EXPR_COLUMN)) {
-            string_copy(col_name, MAX_COLUMN_NAME_LEN, expr->binary.left->column_name);
+            strcopy(col_name, MAX_COLUMN_NAME_LEN, expr->binary.left->column_name);
             *op = expr->binary.op;
 
             if (expr->binary.right->type == EXPR_VALUE) {
@@ -249,4 +250,41 @@ void free_plan(PlanNode *plan) {
     }
 
     free(plan);
+}
+
+TableStats *get_table_stats(const char *table_name) {
+    if (!table_name)
+        return NULL;
+
+    for (int i = 0; i < g_stats_count; i++) {
+        if (strcmp(g_stats[i].table_name, table_name) == 0) {
+            return &g_stats[i];
+        }
+    }
+    return NULL;
+}
+
+void collect_table_stats(const char *table_name) {
+    if (!table_name)
+        return;
+
+    for (int i = 0; i < g_stats_count; i++) {
+        if (strcmp(g_stats[i].table_name, table_name) == 0) {
+            return;
+        }
+    }
+
+    if (g_stats_count < MAX_TABLES) {
+        strcopy(g_stats[g_stats_count].table_name, sizeof(g_stats[g_stats_count].table_name),
+                table_name);
+        g_stats[g_stats_count].total_rows = 1000; // Default estimate
+        g_stats[g_stats_count].has_stats = false;
+
+        for (int i = 0; i < MAX_COLUMNS; i++) {
+            g_stats[g_stats_count].distinct_values[i] = 100;
+        }
+
+        g_stats_count++;
+        log_msg(LOG_INFO, "Collected stats for table '%s'", table_name);
+    }
 }

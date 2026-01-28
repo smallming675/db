@@ -87,9 +87,13 @@ typedef enum {
 } DataType;
 
 typedef struct {
+    uint8_t table_id;
+    uint16_t column_idx;
+} ReferenceTable;
+
+typedef struct {
     char name[MAX_COLUMN_NAME_LEN];
-    char references_table[MAX_TABLE_NAME_LEN];
-    char references_column[MAX_COLUMN_NAME_LEN];
+    ReferenceTable reference;
     DataType type;
     unsigned int flags;
     struct Expr *check_expr;
@@ -157,7 +161,7 @@ typedef struct {
 
 typedef struct {
     char column_name[MAX_COLUMN_NAME_LEN];
-    int8_t column_idx;
+    uint8_t column_idx;
     Value value;
 } ColumnValue;
 
@@ -234,9 +238,12 @@ struct ASTNode;
 
 typedef struct Expr {
     ExprType type;
-    char alias[MAX_COLUMN_NAME_LEN];
+    char *alias;
     union {
-        char column_name[MAX_COLUMN_NAME_LEN];
+        struct {
+            uint8_t table_id;
+            uint8_t column_id;
+        } column;
         Value value;
         struct {
             OperatorType op;
@@ -267,8 +274,8 @@ typedef struct Expr {
 typedef enum { JOIN_NONE, JOIN_INNER, JOIN_LEFT } JoinType;
 
 typedef struct {
-    int left_table_id;
-    int right_table_id;
+    uint8_t left_table_id;
+    uint8_t right_table_id;
     JoinType type;
     Expr *condition;
 } JoinNode;
@@ -305,10 +312,10 @@ typedef struct {
     Expr *where_clause;
     ArrayList order_by;      /* Expr* */
     ArrayList order_by_desc; /* Expr* */
-    int order_by_count;
-    int limit;
+    uint32_t order_by_count;
+    uint32_t limit;
     JoinType join_type;
-    int join_table_id;
+    uint8_t join_table_id;
     char join_table_name[MAX_TABLE_NAME_LEN];
     Expr *join_condition;
     bool distinct;
@@ -320,7 +327,7 @@ typedef struct {
 
 typedef struct {
     uint8_t table_id;
-    int column_idx;
+    uint16_t column_idx;
     char index_name[MAX_TABLE_NAME_LEN];
 } CreateIndexNode;
 

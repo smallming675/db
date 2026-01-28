@@ -260,7 +260,7 @@ void test_create_table_new_types(void) {
         return;
     }
     assert_true(strcmp(col->name, "image") == 0, "Fifth column should be 'image'");
-    assert_int_eq(TYPE_BLOB, col->type, "image should be BLOB type");
+    assert_int_eq(TYPE_BLOB, col->type, "image should be BLOB type (enum value 6)");
 
     log_msg(LOG_INFO, "CREATE TABLE with new data types tests passed");
 }

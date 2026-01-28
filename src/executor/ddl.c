@@ -23,7 +23,7 @@ Value copy_string_value(const Value *src) {
     if (src->type == TYPE_STRING && src->char_val) {
         copy.char_val = malloc(strlen(src->char_val) + 1);
         if (copy.char_val) {
-            string_copy(copy.char_val, strlen(src->char_val) + 1, src->char_val);
+            strcopy(copy.char_val, strlen(src->char_val) + 1, src->char_val);
         }
     }
     return copy;
@@ -48,7 +48,7 @@ void exec_create_table_ast(ASTNode *ast) {
         return;
     }
 
-    string_copy(table->name, sizeof(table->name), ct->table_name);
+    strcopy(table->name, sizeof(table->name), ct->table_name);
     alist_init(&table->rows, sizeof(Row), free_row_contents);
     alist_init(&table->schema.columns, sizeof(ColumnDef), NULL);
     table->schema.strict = ct->strict;
@@ -81,7 +81,7 @@ void exec_drop_table_ast(ASTNode *ast) {
         return;
 
     char table_name[MAX_TABLE_NAME_LEN];
-    string_copy(table_name, sizeof(table_name), table->name);
+    strcopy(table_name, sizeof(table_name), table->name);
 
     for (int i = 0; i < alist_length(&tables); i++) {
         Table *t = (Table *)alist_get(&tables, i);
