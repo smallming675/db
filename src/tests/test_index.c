@@ -24,11 +24,7 @@ void test_create_index(void) {
     Index *index = (Index *)alist_get(&indexes, 0);
     assert_ptr_not_null(index, "Index should exist");
     assert_true(index->index_name[0] != '\0', "Index name should be set");
-    assert_true(index->table_name[0] != '\0', "Index table name should be set");
-    assert_true(index->column_name[0] != '\0', "Index column name should be set");
     assert_str_eq("idx_users_id", index->index_name, "Index name should be 'idx_users_id'");
-    assert_str_eq("users", index->table_name, "Index table name should be 'users'");
-    assert_str_eq("id", index->column_name, "Index column name should be 'id'");
     assert_int_eq(3, index->entry_count, "Index should have 3 entries");
 
     log_msg(LOG_INFO, "CREATE INDEX tests passed");

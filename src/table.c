@@ -86,6 +86,11 @@ void free_value(void *ptr) {
 }
 
 Table *find_table(const char *name) {
+    ParseContext *ctx = parse_get_context();
+    if (ctx && ctx->current_table && strcmp(ctx->current_table->name, name) == 0) {
+        return ctx->current_table;
+    }
+
     for (int i = 0; i < alist_length(&tables); i++) {
         Table *table = (Table *)alist_get(&tables, i);
         if (table && strcmp(table->name, name) == 0) {
@@ -96,6 +101,11 @@ Table *find_table(const char *name) {
 }
 
 uint8_t find_table_id_by_name(const char *name) {
+    ParseContext *ctx = parse_get_context();
+    if (ctx && ctx->current_table && strcmp(ctx->current_table->name, name) == 0) {
+        return ctx->current_table->table_id;
+    }
+
     for (int i = 0; i < alist_length(&tables); i++) {
         Table *table = (Table *)alist_get(&tables, i);
         if (table && strcmp(table->name, name) == 0) {
@@ -187,56 +197,35 @@ bool check_foreign_key_constraint(Table *table, int col_idx, Value *val) {
     ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, col_idx);
     if (!col)
         return false;
-    if (!(col->flags & COL_FLAG_FOREIGN_KEY) || col->references_table[0] == '\0')
+    if (!(col->flags & COL_FLAG_FOREIGN_KEY))
         return true;
     if (is_null(val))
         return true;
 
-    Table *ref_table = find_table(col->references_table);
+    Table *ref_table = get_table_by_id(col->reference.table_id);
     if (!ref_table) {
-        log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY references non-existent table '%s'",
-                col->references_table);
+        log_msg(LOG_ERROR, "Constraint violation: FOREIGN KEY references non-existent table_id=%d",
+                col->reference.table_id);
         return false;
     }
 
-    int ref_col_idx = -1;
-    if (col->references_column[0] != '\0') {
-        int ref_col_count = alist_length(&ref_table->schema.columns);
-        for (int i = 0; i < ref_col_count; i++) {
-            ColumnDef *ref_col = (ColumnDef *)alist_get(&ref_table->schema.columns, i);
-            if (ref_col && strcmp(ref_col->name, col->references_column) == 0) {
-                ref_col_idx = i;
-                break;
-            }
-        }
-    } else {
-        ref_col_idx = 0;
-    }
-
-    if (ref_col_idx < 0) {
-        log_msg(
-            LOG_ERROR,
-            "Constraint violation: FOREIGN KEY references non-existent column '%s' in table '%s'",
-            col->references_column, col->references_table);
-        return false;
-    }
+    uint16_t ref_col_id = col->reference.column_id;
 
     int ref_row_count = alist_length(&ref_table->rows);
     for (int i = 0; i < ref_row_count; i++) {
         Row *ref_row = (Row *)alist_get(&ref_table->rows, i);
-        ColumnDef *ref_col = (ColumnDef *)alist_get(&ref_table->schema.columns, ref_col_idx);
-        if (ref_row && ref_col) {
-            Value *ref_val = (Value *)alist_get(ref_row, ref_col_idx);
+        if (ref_row) {
+            Value *ref_val = (Value *)alist_get(ref_row, ref_col_id);
             if (ref_val && value_equals(ref_val, val)) {
                 return true;
             }
         }
     }
 
-    ColumnDef *ref_col = (ColumnDef *)alist_get(&ref_table->schema.columns, ref_col_idx);
+    ColumnDef *ref_col = (ColumnDef *)alist_get(&ref_table->schema.columns, ref_col_id);
     log_msg(LOG_ERROR,
-            "Constraint violation: FOREIGN KEY on column '%s' (value '%s' not found in %s.%s)",
-            col->name, repr(val), col->references_table, ref_col ? ref_col->name : "unknown");
+            "Constraint violation: FOREIGN KEY on column '%s' (value '%s' not found in table_id=%d col=%s)",
+            col->name, repr(val), col->reference.table_id, ref_col ? ref_col->name : "unknown");
     return false;
 }
 
@@ -304,8 +293,10 @@ static void free_index(void *ptr) {
     if (!index)
         return;
 
+    alist_destroy(&index->columns);
+
     if (index->buckets) {
-        for (int i = 0; i < index->bucket_count; i++) {
+        for (int i = 0; i < (int)index->bucket_count; i++) {
             if (index->buckets[i]) {
                 free_index_entry(index->buckets[i]);
             }
@@ -329,27 +320,6 @@ Index *find_index(const char *index_name) {
     return NULL;
 }
 
-/* Create an index on a table column */
-static int find_column_index(Table *table, const char *column_name) {
-    int column_count = alist_length(&table->schema.columns);
-    for (int i = 0; i < column_count; i++) {
-        ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, i);
-        if (col && strcasecmp(col->name, column_name) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-static void create_index_name(const char *table_name, const char *column_name,
-                              const char *index_name, char *result, size_t result_size) {
-    if (index_name && index_name[0] != '\0') {
-        strcopy(result, result_size, index_name);
-    } else {
-        string_format(result, result_size, "idx_%s_%s", table_name, column_name);
-    }
-}
-
 static void remove_existing_index(const char *idx_name) {
     int index_count = alist_length(&indexes);
     for (int i = 0; i < index_count; i++) {
@@ -361,8 +331,8 @@ static void remove_existing_index(const char *idx_name) {
     }
 }
 
-static Index *create_and_init_index(const char *idx_name, const char *table_name,
-                                    const char *column_name) {
+static Index *create_and_init_index(const char *idx_name, uint8_t table_id,
+                                    ArrayList *column_ids) {
     Index *index = (Index *)malloc(sizeof(Index));
     if (!index) {
         log_msg(LOG_ERROR, "index_table_column: Failed to allocate index");
@@ -371,14 +341,25 @@ static Index *create_and_init_index(const char *idx_name, const char *table_name
 
     memclear(index, sizeof(Index));
     strcopy(index->index_name, sizeof(index->index_name), idx_name);
-    strcopy(index->table_name, sizeof(index->table_name), table_name);
-    strcopy(index->column_name, sizeof(index->column_name), column_name);
+    index->table_id = table_id;
+    alist_init(&index->columns, sizeof(uint16_t), NULL);
+
+    int col_count = alist_length(column_ids);
+    for (int i = 0; i < col_count; i++) {
+        uint16_t *src_id = (uint16_t *)alist_get(column_ids, i);
+        uint16_t *dst_id = (uint16_t *)alist_append(&index->columns);
+        if (src_id && dst_id) {
+            *dst_id = *src_id;
+        }
+    }
+
     index->bucket_count = 64;
     index->buckets = calloc(index->bucket_count, sizeof(IndexEntry *));
     index->entry_count = 0;
 
     if (!index->buckets) {
         log_msg(LOG_ERROR, "index_table_column: Failed to allocate index buckets");
+        alist_destroy(&index->columns);
         free(index);
         return NULL;
     }
@@ -386,18 +367,26 @@ static Index *create_and_init_index(const char *idx_name, const char *table_name
     return index;
 }
 
-static void populate_index_entries(Index *index, Table *table, int column_idx) {
+static void populate_index_entries(Index *index, Table *table) {
+    if (alist_length(&index->columns) == 0)
+        return;
+
+    uint16_t *col = (uint16_t *)alist_get(&index->columns, 0);
+    if (!col)
+        return;
+    uint16_t col_id = *col;
+
     int row_count = alist_length(&table->rows);
     for (int i = 0; i < row_count; i++) {
         Row *row = (Row *)alist_get(&table->rows, i);
-        if (!row || alist_length(row) <= column_idx)
+        if (!row || alist_length(row) <= col_id)
             continue;
 
         IndexEntry *entry = malloc(sizeof(IndexEntry));
         if (!entry)
             continue;
 
-        Value *row_val = (Value *)alist_get(row, column_idx);
+        Value *row_val = (Value *)alist_get(row, col_id);
         entry->key = copy_value(row_val);
         entry->row_index = i;
         entry->next = NULL;
@@ -409,48 +398,54 @@ static void populate_index_entries(Index *index, Table *table, int column_idx) {
     }
 }
 
-void index_table_column(const char *table_name, const char *column_name, const char *index_name) {
-    if (!table_name || !column_name)
+void index_table(uint8_t table_id, ArrayList *column_ids, const char *index_name) {
+    if (!column_ids || alist_length(column_ids) == 0)
         return;
 
-    Table *table = get_table(table_name);
+    Table *table = get_table_by_id(table_id);
     if (!table) {
-        log_msg(LOG_ERROR, "index_table_column: Table '%s' not found", table_name);
-        return;
-    }
-
-    int column_idx = find_column_index(table, column_name);
-    if (column_idx < 0) {
-        log_msg(LOG_ERROR, "index_table_column: Column '%s' not found in table '%s'", column_name,
-                table_name);
+        log_msg(LOG_ERROR, "index_table: Table with ID %d not found", table_id);
         return;
     }
 
     char idx_name[MAX_TABLE_NAME_LEN];
-    create_index_name(table_name, column_name, index_name, idx_name, sizeof(idx_name));
+    if (index_name && index_name[0] != '\0') {
+        strcopy(idx_name, sizeof(idx_name), index_name);
+    } else {
+        uint16_t *first_col = (uint16_t *)alist_get(column_ids, 0);
+        ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, *first_col);
+        string_format(idx_name, sizeof(idx_name), "idx_%s_%s", table->name,
+                      col ? col->name : "unknown");
+    }
 
     Index *existing = find_index(idx_name);
     if (existing) {
-        log_msg(LOG_INFO, "index_table_column: Index '%s' already exists, rebuilding", idx_name);
+        log_msg(LOG_INFO, "index_table: Index '%s' already exists, rebuilding", idx_name);
         remove_existing_index(idx_name);
     }
 
-    Index *index = create_and_init_index(idx_name, table_name, column_name);
+    Index *index = create_and_init_index(idx_name, table_id, column_ids);
     if (!index)
         return;
 
-    populate_index_entries(index, table, column_idx);
+    populate_index_entries(index, table);
 
     Index *stored = (Index *)alist_append(&indexes);
     stored->bucket_count = index->bucket_count;
     stored->buckets = index->buckets;
     stored->entry_count = index->entry_count;
     strcopy(stored->index_name, sizeof(stored->index_name), index->index_name);
-    strcopy(stored->table_name, sizeof(stored->table_name), index->table_name);
-    strcopy(stored->column_name, sizeof(stored->column_name), index->column_name);
+    stored->table_id = index->table_id;
+    alist_init(&stored->columns, sizeof(uint16_t), NULL);
+    for (int i = 0; i < alist_length(&index->columns); i++) {
+        uint16_t *src = (uint16_t *)alist_get(&index->columns, i);
+        uint16_t *dst = (uint16_t *)alist_append(&stored->columns);
+        if (src && dst)
+            *dst = *src;
+    }
 
-    log_msg(LOG_INFO, "index_table_column: Created index '%s' on '%s.%s' with %d entries",
-            index_name, table_name, column_name, index->entry_count);
+    log_msg(LOG_INFO, "index_table: Created index '%s' on table_id=%d with %d entries", idx_name,
+            table_id, index->entry_count);
 
     free(index);
 }
@@ -473,16 +468,17 @@ void drop_index_by_name(const char *index_name) {
     log_msg(LOG_ERROR, "drop_index_by_name: Index '%s' not found", index_name);
 }
 
-Index *find_index_by_table_column(const char *table_name, const char *column_name) {
-    if (!table_name || !column_name)
-        return NULL;
-
+Index *find_index_by_table_column(uint8_t table_id, uint16_t column_id) {
     int index_count = alist_length(&indexes);
     for (int i = 0; i < index_count; i++) {
         Index *idx = (Index *)alist_get(&indexes, i);
-        if (idx && strcmp(idx->table_name, table_name) == 0 &&
-            strcasecmp(idx->column_name, column_name) == 0) {
-            return idx;
+        if (idx && idx->table_id == table_id) {
+            if (alist_length(&idx->columns) > 0) {
+                uint16_t *first_col = (uint16_t *)alist_get(&idx->columns, 0);
+                if (first_col && *first_col == column_id) {
+                    return idx;
+                }
+            }
         }
     }
     return NULL;

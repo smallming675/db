@@ -63,13 +63,13 @@ void exec_create_table_ast(ASTNode *ast) {
         }
     }
 
-    table->table_id = alist_length(&tables);
+    table->table_id = alist_length(&tables) + 1;
     Table *t = (Table *)alist_append(&tables);
     if (t)
         *t = *table;
 
-    log_msg(LOG_INFO, "Created table '%s' with %d columns (STRICT=%s)", ct->table_name, col_count,
-            ct->strict ? "true" : "false");
+    log_msg(LOG_INFO, "Created table '%s' with %d columns (STRICT=%s) table_id=%d", ct->table_name, col_count,
+            ct->strict ? "true" : "false", table->table_id);
 
     free(table);
 }
@@ -102,20 +102,12 @@ void exec_create_index_ast(ASTNode *ast) {
         return;
     }
 
-    const char *column_name = NULL;
-    if (ci->column_idx >= 0 && ci->column_idx < alist_length(&table->schema.columns)) {
-        ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, ci->column_idx);
-        if (col) {
-            column_name = col->name;
-        }
-    }
-
-    if (!column_name) {
-        log_msg(LOG_ERROR, "Column not found for index creation");
+    if (alist_length(&ci->column_ids) == 0) {
+        log_msg(LOG_ERROR, "No columns specified for index creation");
         return;
     }
 
-    index_table_column(table->name, column_name, ci->index_name);
+    index_table(ci->table_id, &ci->column_ids, ci->index_name);
 }
 
 void exec_drop_index_ast(ASTNode *ast) {

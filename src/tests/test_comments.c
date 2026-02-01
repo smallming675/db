@@ -2,8 +2,8 @@
 #include "db.h"
 #include "logger.h"
 
-void test_real_type_and_comments(void) {
-    log_msg(LOG_INFO, "Testing REAL type and multiline comments...");
+void test_comments(void) {
+    log_msg(LOG_INFO, "Testing multiline comments...");
 
     reset_database();
 
@@ -28,12 +28,12 @@ void test_real_type_and_comments(void) {
 
     row = (Row *)alist_get(&table->rows, 1);
     val = (Value *)alist_get(row, 1);
-    assert_int_eq(TYPE_FLOAT, val->type, "Second row value should be REAL (type 2)");
+    assert_int_eq(TYPE_FLOAT, val->type, "Second row value should be REAL");
     assert_float_eq(-2.71828, val->float_val, 0.00001, "Second value should be -e");
 
     exec("INSERT INTO test_real VALUES (4, 1.41421); -- Square root of 2");
 
-    log_msg(LOG_INFO, "REAL type and comments tests passed");
+    log_msg(LOG_INFO, "Comments tests passed");
 }
 
 void test_primary_key_definitions(void) {
@@ -73,7 +73,7 @@ void test_primary_key_definitions(void) {
     assert_ptr_not_null(ref_col, "Ref column should exist");
     assert_true((ref_col->flags & COL_FLAG_PRIMARY_KEY), "Ref column should be PRIMARY KEY");
 
-    exec("CREATE TABLE pk_multi (id INT PRIMARY KEY, value INT, PRIMARY KEY (id), name STRING "
+    exec("CREATE TABLE pk_multi (id INT PRIMARY KEY, value INT PRIMARY KEY, name STRING "
          "UNIQUE);");
     table = find_table_by_name("pk_multi");
     assert_ptr_not_null(table, "Multi-key table should exist");

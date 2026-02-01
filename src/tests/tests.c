@@ -115,7 +115,7 @@ void test_btree_basic(void);
 void test_query_stats_basic(void);
 void test_aggregation_improved(void);
 void test_new_features_simple(void);
-void test_real_type_and_comments(void);
+void test_comments(void);
 void test_btree_basic(void);
 void test_query_stats_basic(void);
 void test_aggregation_improved(void);
@@ -149,7 +149,7 @@ int main(void) {
     test_delete_multiple_rows();
     test_delete_all_rows();
     test_insert_with_comments();
-    test_real_type_and_comments();
+    test_comments();
     test_primary_key_definitions();
     test_multiple_statements();
     test_update_with_expression();

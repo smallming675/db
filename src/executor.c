@@ -46,7 +46,7 @@ void free_query_result(QueryResult *result) {
 static void exec_select_ast(ASTNode *current) {
     SelectNode *select = &current->select;
     bool has_agg = has_aggregate_expr(current);
-    bool has_join = (select->join_type != JOIN_NONE && select->join_table_id >= 0);
+    bool has_join = select->join_type != JOIN_NONE;
     uint8_t result_table_id = select->table_id;
 
     if (has_join) {

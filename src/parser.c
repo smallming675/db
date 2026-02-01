@@ -746,7 +746,7 @@ static bool expect(ParseContext *ctx, TokenType type, const char *context) {
 }
 
 static DataType parse_data_type(ParseContext *ctx) {
-    if (consume(ctx, TOKEN_KEYWORD)) {
+    if (consume(ctx, TOKEN_KEYWORD) || consume(ctx, TOKEN_IDENTIFIER)) {
         if (strcasecmp(current_token[-1].value, "INT") == 0)
             return TYPE_INT;
         if (strcasecmp(current_token[-1].value, "INTEGER") == 0)
@@ -799,7 +799,7 @@ static bool parse_column_name_and_type(ParseContext *ctx, ColumnDef *col) {
     col->type = parse_data_type(ctx);
     col->flags = COL_FLAG_NULLABLE;
     col->reference.table_id = 0;
-    col->reference.column_idx = 0;
+    col->reference.column_id = 0;
     return true;
 }
 
@@ -815,8 +815,8 @@ static int find_column_index_static(Table *table, const char *column_name) {
 }
 
 static bool parse_column_foreign_key_refs(ParseContext *ctx, ColumnDef *col) {
-    advance();  // FOREIGN
-    
+    advance(); // FOREIGN
+
     if (current_token->type != TOKEN_KEY) {
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected KEY after FOREIGN", "KEY",
                         token_type_name(current_token->type), NULL);
@@ -884,11 +884,11 @@ static bool parse_column_foreign_key_refs(ParseContext *ctx, ColumnDef *col) {
         return false;
     }
 
-    col->reference.column_idx = (uint16_t)col_idx;
+    col->reference.column_id = (uint16_t)col_idx;
     col->flags |= COL_FLAG_FOREIGN_KEY;
 
-    log_msg(LOG_DEBUG, "Column '%s' FOREIGN KEY REFERENCES table_id=%d column_idx=%d", col->name,
-            col->reference.table_id, col->reference.column_idx);
+    log_msg(LOG_DEBUG, "Column '%s' FOREIGN KEY REFERENCES table_id=%d column_id=%d", col->name,
+            col->reference.table_id, col->reference.column_id);
 
     return true;
 }
@@ -927,7 +927,8 @@ static bool parse_column_references(ParseContext *ctx, ColumnDef *col) {
                                         "existing column", NULL);
                         return false;
                     }
-                    col->reference.column_idx = (uint16_t)col_idx;
+                    col->reference.column_id = (uint16_t)col_idx;
+                    col->flags |= COL_FLAG_FOREIGN_KEY;
                 }
             } else {
                 parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
@@ -937,8 +938,8 @@ static bool parse_column_references(ParseContext *ctx, ColumnDef *col) {
             }
         }
         col->flags |= COL_FLAG_FOREIGN_KEY;
-        log_msg(LOG_DEBUG, "parse_column_def: Column '%s' REFERENCES table_id=%d column_idx=%d",
-                col->name, col->reference.table_id, col->reference.column_idx);
+        log_msg(LOG_DEBUG, "parse_column_def: Column '%s' REFERENCES table_id=%d column_id=%d",
+                col->name, col->reference.table_id, col->reference.column_id);
     } else {
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected table name in REFERENCES",
                         "table name", token_type_name(current_token->type), NULL);
@@ -959,17 +960,29 @@ static bool parse_column_def(ParseContext *ctx, ColumnDef *col) {
             log_msg(LOG_DEBUG, "parse_column_def: Column '%s' NOT NULL", col->name);
             advance();
             advance();
-        } else if (current_token->type == TOKEN_UNIQUE) {
+        } else if ((current_token->type == TOKEN_UNIQUE) ||
+                   (current_token->type == TOKEN_KEYWORD &&
+                    strcasecmp(current_token->value, "UNIQUE") == 0)) {
             col->flags |= COL_FLAG_UNIQUE;
             log_msg(LOG_DEBUG, "parse_column_def: Column '%s' UNIQUE", col->name);
             advance();
-        } else if (current_token->type == TOKEN_PRIMARY && current_token[1].type == TOKEN_KEY) {
+        } else if (((current_token->type == TOKEN_PRIMARY) ||
+                    (current_token->type == TOKEN_KEYWORD &&
+                     strcasecmp(current_token->value, "PRIMARY") == 0)) &&
+                   ((current_token[1].type == TOKEN_KEY) ||
+                    (current_token[1].type == TOKEN_KEYWORD &&
+                     strcasecmp(current_token[1].value, "KEY") == 0))) {
             col->flags |= COL_FLAG_PRIMARY_KEY | COL_FLAG_UNIQUE;
             col->flags &= ~COL_FLAG_NULLABLE;
             log_msg(LOG_DEBUG, "parse_column_def: Column '%s' PRIMARY KEY", col->name);
             advance();
             advance();
-        } else if (current_token->type == TOKEN_KEY && current_token[-1].type != TOKEN_PRIMARY) {
+        } else if (((current_token->type == TOKEN_KEY) ||
+                    (current_token->type == TOKEN_KEYWORD &&
+                     strcasecmp(current_token->value, "KEY") == 0)) &&
+                   current_token[-1].type != TOKEN_PRIMARY &&
+                   !(current_token[-1].type == TOKEN_KEYWORD &&
+                     strcasecmp(current_token[-1].value, "PRIMARY") == 0)) {
             log_msg(LOG_WARN, "parse_column_def: KEY without PRIMARY, ignoring");
             advance();
         } else if (current_token->type == TOKEN_KEYWORD &&
@@ -996,18 +1009,67 @@ static bool parse_column_def(ParseContext *ctx, ColumnDef *col) {
     return true;
 }
 
+static bool parse_table_constraint(ParseContext *ctx, CreateTableNode *ct) {
+    if ((current_token->type == TOKEN_PRIMARY) ||
+        (current_token->type == TOKEN_KEYWORD &&
+         strcasecmp(current_token->value, "PRIMARY") == 0)) {
+        advance();
+        if (!expect(ctx, TOKEN_KEY, "PRIMARY KEY"))
+            return false;
+        if (!expect(ctx, TOKEN_LPAREN, "PRIMARY KEY ("))
+            return false;
+
+        while (true) {
+            if (!match(TOKEN_IDENTIFIER)) {
+                parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected column name",
+                                "column name", current_token->value, NULL);
+                return false;
+            }
+
+            const char *col_name = current_token->value;
+            bool found = false;
+            for (int i = 0; i < alist_length(&ct->columns); i++) {
+                ColumnDef *col = (ColumnDef *)alist_get(&ct->columns, i);
+                if (col && strcasecmp(col->name, col_name) == 0) {
+                    col->flags |= COL_FLAG_PRIMARY_KEY | COL_FLAG_UNIQUE;
+                    col->flags &= ~COL_FLAG_NULLABLE;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Column not found in table",
+                                col_name, "existing column", NULL);
+                return false;
+            }
+
+            advance();
+            if (consume(ctx, TOKEN_COMMA))
+                continue;
+            break;
+        }
+
+        if (!expect(ctx, TOKEN_RPAREN, "PRIMARY KEY )"))
+            return false;
+        return true;
+    }
+
+    return false;
+}
+
 static ASTNode *parse_create_table(ParseContext *ctx) {
     log_msg(LOG_DEBUG, "parse_create_table: Starting CREATE TABLE parsing");
 
     if (!expect(ctx, TOKEN_IDENTIFIER, "CREATE TABLE")) {
-        return NULL;
+        return false;
     }
 
     ASTNode *node = malloc(sizeof(ASTNode));
     if (!node) {
         parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for CREATE TABLE node",
                         "memory", "NULL", "Try again or reduce query complexity");
-        return NULL;
+        return false;
     }
 
     memclear(node, sizeof(ASTNode));
@@ -1020,6 +1082,7 @@ static ASTNode *parse_create_table(ParseContext *ctx) {
     log_msg(LOG_DEBUG, "parse_create_table: Table name = '%s'", node->create_table.table_name);
 
     if (!expect(ctx, TOKEN_LPAREN, "CREATE TABLE")) {
+        free_ast(node);
         return false;
     }
 
@@ -1027,40 +1090,58 @@ static ASTNode *parse_create_table(ParseContext *ctx) {
 
     alist_init(&node->create_table.columns, sizeof(ColumnDef), NULL);
 
+    Table tmp;
+    memclear(&tmp, sizeof(Table));
+    strcopy(tmp.name, sizeof(tmp.name), node->create_table.table_name);
+    tmp.table_id = alist_length(&tables) + 1;
+    tmp.schema.columns = node->create_table.columns;
+    ctx->current_table = &tmp;
+
     int col_count = 0;
     while (!match(TOKEN_RPAREN)) {
-        ColumnDef *col = (ColumnDef *)alist_append(&node->create_table.columns);
-        if (!col) {
-            parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for columns",
-                            "memory", "NULL", NULL);
-            free_ast(node);
-            return NULL;
-        }
+        if (current_token->type == TOKEN_PRIMARY) {
+            if (!parse_table_constraint(ctx, &node->create_table)) {
+                ctx->current_table = NULL;
+                free_ast(node);
+                return NULL;
+            }
+        } else {
+            ColumnDef *col = (ColumnDef *)alist_append(&node->create_table.columns);
+            if (!col) {
+                parse_error_set(ctx, PARSE_ERROR_INVALID_SYNTAX, "malloc() failed for columns",
+                                "memory", "NULL", NULL);
+                ctx->current_table = NULL;
+                free_ast(node);
+                return NULL;
+            }
 
-        if (!parse_column_def(ctx, col)) {
-            log_msg(LOG_ERROR, "parse_create_table: Failed to column %d", col_count);
-            free_ast(node);
-            return NULL;
+            tmp.schema.columns = node->create_table.columns;
+
+            if (!parse_column_def(ctx, col)) {
+                log_msg(LOG_ERROR, "parse_create_table: Failed to column %d", col_count);
+                ctx->current_table = NULL;
+                free_ast(node);
+                return NULL;
+            }
+            col_count++;
         }
-        col_count++;
 
         if (!consume(ctx, TOKEN_COMMA)) {
             break;
         }
     }
 
+    ctx->current_table = NULL;
+
     if (!expect(ctx, TOKEN_RPAREN, "CREATE TABLE")) {
         return false;
     }
 
-    node->create_table.strict = false;
     if (match(TOKEN_STRICT)) {
         node->create_table.strict = true;
-        log_msg(LOG_DEBUG, "parse_create_table: STRICT mode enabled");
+        advance();
     }
 
-    log_msg(LOG_DEBUG, "parse_create_table: Successfully parsed CREATE TABLE with %d columns",
-            col_count);
     return node;
 }
 
@@ -1390,7 +1471,20 @@ static Expr *parse_primary(ParseContext *ctx) {
     if (match(TOKEN_IDENTIFIER)) {
         log_msg(LOG_DEBUG, "parse_primary: Parsing identifier '%s'", current_token->value);
         expr->type = EXPR_COLUMN;
-        strcopy(expr->column_name, sizeof(expr->column_name), current_token->value);
+        expr->column.column_id = -1;
+        expr->column.table_id = 0;
+
+        if (ctx->current_table) {
+            expr->column.table_id = ctx->current_table->table_id;
+            for (int i = 0; i < alist_length(&ctx->current_table->schema.columns); i++) {
+                ColumnDef *col = (ColumnDef *)alist_get(&ctx->current_table->schema.columns, i);
+                if (col && strcasecmp(col->name, current_token->value) == 0) {
+                    expr->column.column_id = i;
+                    break;
+                }
+            }
+        } else {
+        }
         advance();
     } else if (match(TOKEN_STRING) || match(TOKEN_NUMBER) || match(TOKEN_DATE) ||
                match(TOKEN_TIME)) {
@@ -1680,6 +1774,7 @@ static Table *parse_insert_table_and_columns(ParseContext *ctx, ASTNode *node,
     const char *table_name = current_token[-1].value;
     Table *table = find_table(table_name);
     node->insert.table_id = table ? table->table_id : -1;
+    ctx->current_table = table;
 
     log_msg(LOG_DEBUG, "parse_insert: Table name = '%s', table_id = %d", table_name,
             node->insert.table_id);
@@ -1901,9 +1996,11 @@ static ASTNode *parse_insert(ParseContext *ctx) {
     if (!parse_insert_value_rows(ctx, node, has_columns, col_count, table))
         goto error;
 
+    ctx->current_table = NULL;
     return node;
 
 error:
+    ctx->current_table = NULL;
     alist_destroy(&column_indices);
     free_ast(node);
     return NULL;
@@ -2095,8 +2192,6 @@ static bool parse_select_join_clause(ParseContext *ctx, ASTNode *node) {
             return false;
         }
         node->select.join_table_id = join_table->table_id;
-        strcopy(node->select.join_table_name, sizeof(node->select.join_table_name),
-                join_table_name);
         advance();
 
         if (!match(TOKEN_KEYWORD) || strcasecmp(current_token->value, "ON") != 0) {
@@ -2204,6 +2299,30 @@ static ASTNode *parse_select(ParseContext *ctx) {
 
     alist_init(&node->select.expressions, sizeof(Expr *), NULL);
 
+    // Peek ahead for FROM to resolve column IDs
+    int original_idx = ctx->current_token_index;
+    int from_idx = -1;
+    int depth = 0;
+    for (int i = ctx->current_token_index; i < ctx->token_count; i++) {
+        if (ctx->tokens[i].type == TOKEN_LPAREN)
+            depth++;
+        if (ctx->tokens[i].type == TOKEN_RPAREN)
+            depth--;
+        if (depth == 0 && ctx->tokens[i].type == TOKEN_KEYWORD &&
+            strcasecmp(ctx->tokens[i].value, "FROM") == 0) {
+            from_idx = i;
+            break;
+        }
+    }
+
+    if (from_idx != -1) {
+        ctx->current_token_index = from_idx + 1;
+        if (match(TOKEN_IDENTIFIER)) {
+            ctx->current_table = find_table(current_token->value);
+        }
+        ctx->current_token_index = original_idx;
+    }
+
     if (!parse_select_columns(ctx, node))
         goto error;
     if (!parse_select_from_table(ctx, node))
@@ -2227,9 +2346,11 @@ static ASTNode *parse_select(ParseContext *ctx) {
 
     log_msg(LOG_DEBUG, "parse_select: Successfully parsed SELECT with %d expressions",
             alist_length(&node->select.expressions));
+    ctx->current_table = NULL;
     return node;
 
 error:
+    ctx->current_table = NULL;
     free_ast(node);
     return NULL;
 }
@@ -2277,6 +2398,7 @@ static Table *parse_update_table_and_set(ParseContext *ctx, ASTNode *node) {
     const char *table_name = current_token[-1].value;
     Table *table = find_table(table_name);
     node->update.table_id = table ? table->table_id : -1;
+    ctx->current_table = table;
 
     log_msg(LOG_DEBUG, "parse_update: Table name = '%s', table_id = %d", table_name,
             node->update.table_id);
@@ -2320,20 +2442,20 @@ static bool parse_update_assignments(ParseContext *ctx, ASTNode *node, Table *ta
 
         strcopy(cv->column_name, sizeof(cv->column_name), current_token->value);
 
-        cv->column_idx = -1;
+        cv->column_id = -1;
         if (table) {
             int col_count = alist_length(&table->schema.columns);
             for (int c = 0; c < col_count; c++) {
                 ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, c);
                 if (col && strcmp(col->name, cv->column_name) == 0) {
-                    cv->column_idx = c;
+                    cv->column_id = c;
                     break;
                 }
             }
         }
 
-        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s' (idx=%d)",
-                cv->column_name, cv->column_idx);
+        log_msg(LOG_DEBUG, "parse_update: Parsing assignment for column '%s' (id=%d)",
+                cv->column_name, cv->column_id);
         advance();
 
         if (!expect(ctx, TOKEN_EQUALS, "UPDATE")) {
@@ -2386,9 +2508,11 @@ static ASTNode *parse_update(ParseContext *ctx) {
 
     log_msg(LOG_DEBUG, "parse_update: Successfully parsed UPDATE with %d assignments",
             alist_length(&node->update.values));
+    ctx->current_table = NULL;
     return node;
 
 error:
+    ctx->current_table = NULL;
     free_ast(node);
     return NULL;
 }
@@ -2422,6 +2546,7 @@ static ASTNode *parse_delete(ParseContext *ctx) {
     const char *table_name = current_token[-1].value;
     Table *table = find_table(table_name);
     node->delete.table_id = table ? table->table_id : -1;
+    ctx->current_table = table;
 
     log_msg(LOG_DEBUG, "parse_delete: Table name = '%s', table_id = %d", table_name,
             node->delete.table_id);
@@ -2439,6 +2564,7 @@ static ASTNode *parse_delete(ParseContext *ctx) {
     }
 
     log_msg(LOG_DEBUG, "parse_delete: Successfully parsed DELETE");
+    ctx->current_table = NULL;
     return node;
 }
 
@@ -2460,6 +2586,7 @@ static ASTNode *parse_index_name_and_allocate(ParseContext *ctx) {
     memclear(node, sizeof(ASTNode));
     node->type = AST_CREATE_INDEX;
     node->next = NULL;
+    alist_init(&node->create_index.column_ids, sizeof(uint16_t), NULL);
 
     strcopy(node->create_index.index_name, sizeof(node->create_index.index_name),
             current_token->value);
@@ -2499,43 +2626,63 @@ static bool parse_column_for_index(ParseContext *ctx, ASTNode *node, Table *tabl
     if (!match(TOKEN_LPAREN)) {
         parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected '(' after table name",
                         "LPAREN", token_type_name(current_token->type),
-                        "Syntax: CREATE INDEX index_name ON table_name (column_name)");
+                        "Syntax: CREATE INDEX index_name ON table_name (column_name, ...)");
         return false;
     }
     advance();
 
-    if (!match(TOKEN_IDENTIFIER)) {
-        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
-                        "Expected column name in index definition", "column name (IDENTIFIER)",
-                        current_token->value,
-                        "Syntax: CREATE INDEX index_name ON table_name (column_name)");
-        return false;
+    while (true) {
+        if (!match(TOKEN_IDENTIFIER)) {
+            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN,
+                            "Expected column name in index definition", "column name (IDENTIFIER)",
+                            current_token->value,
+                            "Syntax: CREATE INDEX index_name ON table_name (column_name, ...)");
+            return false;
+        }
+
+        char column_name[MAX_COLUMN_NAME_LEN];
+        strcopy(column_name, sizeof(column_name), current_token->value);
+
+        log_msg(LOG_DEBUG, "parse_create_index: Column name = '%s'", column_name);
+        advance();
+
+        int col_idx = -1;
+        if (table) {
+            for (int i = 0; i < alist_length(&table->schema.columns); i++) {
+                ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, i);
+                if (col && strcmp(col->name, column_name) == 0) {
+                    col_idx = i;
+                    break;
+                }
+            }
+        }
+
+        if (col_idx == -1) {
+            parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Column not found in table",
+                            column_name, "existing column", NULL);
+            return false;
+        }
+
+        uint16_t *col_id_ptr = (uint16_t *)alist_append(&node->create_index.column_ids);
+        if (col_id_ptr) {
+            *col_id_ptr = (uint16_t)col_idx;
+        }
+
+        if (match(TOKEN_COMMA)) {
+            advance();
+        } else {
+            break;
+        }
     }
-
-    char column_name[MAX_COLUMN_NAME_LEN];
-    strcopy(column_name, sizeof(column_name), current_token->value);
-
-    log_msg(LOG_DEBUG, "parse_create_index: Column name = '%s'", column_name);
-    advance();
 
     if (!match(TOKEN_RPAREN)) {
-        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected ')' after column name",
+        parse_error_set(ctx, PARSE_ERROR_UNEXPECTED_TOKEN, "Expected ')' after column list",
                         "RPAREN", token_type_name(current_token->type),
                         "Make sure all parentheses are balanced");
         return false;
     }
+    advance();
 
-    int col_idx = -1;
-    if (table) {
-        for (int i = 0; i < alist_length(&table->schema.columns); i++) {
-            ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, i);
-            if (col && strcmp(col->name, column_name) == 0) {
-                col_idx = i;
-                break;
-            }
-        }
-    }
-    node->create_index.column_idx = col_idx;
     return true;
 }
 
@@ -2744,6 +2891,9 @@ void free_ast(ASTNode *ast) {
         if (ast->delete.where_clause) {
             free_expr(ast->delete.where_clause);
         }
+        break;
+    case AST_CREATE_INDEX:
+        alist_destroy(&ast->create_index.column_ids);
         break;
     case AST_SELECT: {
         int expr_count = alist_length(&ast->select.expressions);

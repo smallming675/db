@@ -66,10 +66,10 @@ void test_create_table_with_foreign_key(void) {
     ColumnDef *cat_col = (ColumnDef *)alist_get(&products->schema.columns, 2);
     assert_ptr_not_null(cat_col, "category_id column should exist");
     assert_true(cat_col->flags & COL_FLAG_FOREIGN_KEY, "category_id should have FOREIGN KEY flag");
-    assert_str_eq("categories", cat_col->references_table,
-                  "references_table should be 'categories'");
-    assert_str_eq("category_id", cat_col->references_column,
-                  "references_column should be 'category_id'");
+    assert_int_eq(categories->table_id, cat_col->reference.table_id,
+                  "reference table_id should match");
+    assert_int_eq(0, cat_col->reference.column_id,
+                  "reference column_id should be 0 (category_id)");
 
     log_msg(LOG_INFO, "CREATE TABLE with FOREIGN KEY tests passed");
 }

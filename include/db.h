@@ -10,7 +10,7 @@
 #define MAX_TABLE_NAME_LEN 64
 #define MAX_COLUMN_NAME_LEN 64
 #define MAX_STRING_LEN 256
-#define MAX_COLUMNS 32
+#define MAX_COLUMNS 256
 
 #define COL_FLAG_NULLABLE (1 << 0)
 #define COL_FLAG_PRIMARY_KEY (1 << 1)
@@ -87,58 +87,6 @@ typedef enum {
 } DataType;
 
 typedef struct {
-    uint8_t table_id;
-    uint16_t column_idx;
-} ReferenceTable;
-
-typedef struct {
-    char name[MAX_COLUMN_NAME_LEN];
-    ReferenceTable reference;
-    DataType type;
-    unsigned int flags;
-    struct Expr *check_expr;
-} ColumnDef;
-
-typedef struct {
-    ArrayList columns;           /* ColumnDef* */
-    ArrayList check_constraints; /* Expr* */
-    bool strict;
-} TableDef;
-
-typedef enum {
-    PARSE_ERROR_NONE = 0,
-    PARSE_ERROR_UNEXPECTED_TOKEN,
-    PARSE_ERROR_MISSING_TOKEN,
-    PARSE_ERROR_INVALID_SYNTAX,
-    PARSE_ERROR_UNTERMINATED_STRING,
-    PARSE_ERROR_INVALID_NUMBER,
-    PARSE_ERROR_UNEXPECTED_END,
-    PARSE_ERROR_TOO_MANY_COLUMNS,
-    PARSE_ERROR_TABLE_NOT_FOUND,
-} ParseErrorCode;
-
-typedef struct {
-    ParseErrorCode code;
-    char message[1024];
-    char expected[512];
-    char found[256];
-    int line;
-    int column;
-    int token_index;
-    char input[1024];
-    char suggestion[512];
-} ParseError;
-
-typedef struct {
-    char input[1024];
-    Token *tokens;
-    int token_count;
-    int current_token_index;
-    ParseError error;
-    bool error_occurred;
-} ParseContext;
-
-typedef struct {
     DataType type;
     union {
         long long int_val;
@@ -161,7 +109,7 @@ typedef struct {
 
 typedef struct {
     char column_name[MAX_COLUMN_NAME_LEN];
-    uint8_t column_idx;
+    uint8_t column_id;
     Value value;
 } ColumnValue;
 
@@ -235,14 +183,75 @@ typedef enum {
 } ScalarFuncType;
 
 struct ASTNode;
+struct Expr;
+
+typedef struct {
+    uint8_t table_id;
+    uint16_t column_id;
+} ReferenceTable;
+
+typedef struct {
+    char name[MAX_COLUMN_NAME_LEN];
+    ReferenceTable reference;
+    DataType type;
+    unsigned int flags;
+    struct Expr *check_expr;
+} ColumnDef;
+
+typedef struct {
+    ArrayList columns;           /* ColumnDef* */
+    ArrayList check_constraints; /* Expr* */
+    bool strict;
+} TableDef;
+
+typedef struct {
+    char name[MAX_TABLE_NAME_LEN];
+    uint8_t table_id;
+    TableDef schema;
+    ArrayList rows; /* Row* (ArrayList<Value>) */
+} Table;
+
+typedef enum {
+    PARSE_ERROR_NONE = 0,
+    PARSE_ERROR_UNEXPECTED_TOKEN,
+    PARSE_ERROR_MISSING_TOKEN,
+    PARSE_ERROR_INVALID_SYNTAX,
+    PARSE_ERROR_UNTERMINATED_STRING,
+    PARSE_ERROR_INVALID_NUMBER,
+    PARSE_ERROR_UNEXPECTED_END,
+    PARSE_ERROR_TOO_MANY_COLUMNS,
+    PARSE_ERROR_TABLE_NOT_FOUND,
+} ParseErrorCode;
+
+typedef struct {
+    ParseErrorCode code;
+    char message[1024];
+    char expected[512];
+    char found[256];
+    int line;
+    int column;
+    int token_index;
+    char input[1024];
+    char suggestion[512];
+} ParseError;
+
+typedef struct {
+    char input[1024];
+    Token *tokens;
+    int token_count;
+    int current_token_index;
+    ParseError error;
+    bool error_occurred;
+    Table *current_table;
+} ParseContext;
 
 typedef struct Expr {
     ExprType type;
-    char *alias;
+    char alias[MAX_COLUMN_NAME_LEN];
     union {
         struct {
             uint8_t table_id;
-            uint8_t column_id;
+            uint16_t column_id;
         } column;
         Value value;
         struct {
@@ -316,7 +325,6 @@ typedef struct {
     uint32_t limit;
     JoinType join_type;
     uint8_t join_table_id;
-    char join_table_name[MAX_TABLE_NAME_LEN];
     Expr *join_condition;
     bool distinct;
 } SelectNode;
@@ -327,7 +335,7 @@ typedef struct {
 
 typedef struct {
     uint8_t table_id;
-    uint16_t column_idx;
+    ArrayList column_ids; /* uint16_t* */
     char index_name[MAX_TABLE_NAME_LEN];
 } CreateIndexNode;
 
@@ -365,13 +373,6 @@ typedef struct ASTNode {
 
 typedef ArrayList Row;
 
-typedef struct {
-    char name[MAX_TABLE_NAME_LEN];
-    uint8_t table_id;
-    TableDef schema;
-    ArrayList rows; /* Row* (ArrayList<Value>) */
-} Table;
-
 typedef struct IndexEntry {
     Value key;
     int row_index;
@@ -389,14 +390,12 @@ typedef struct BTreeNode {
 
 typedef struct {
     char index_name[MAX_TABLE_NAME_LEN];
-    char table_name[MAX_TABLE_NAME_LEN];
-    char column_name[MAX_COLUMN_NAME_LEN];
-    char column_names[MAX_COLUMNS][MAX_COLUMN_NAME_LEN];
-    int column_count;
+    uint8_t table_id;
+    ArrayList columns; /* uint16_t* */
     IndexType type;
     IndexEntry **buckets;
-    int bucket_count;
-    int entry_count;
+    uint32_t bucket_count;
+    uint32_t entry_count;
     union {
         struct {
             BTreeNode *root;
@@ -436,7 +435,7 @@ typedef struct {
 } ColumnStats;
 
 typedef struct {
-    char table_name[MAX_TABLE_NAME_LEN];
+    uint8_t table_id;
     uint32_t total_rows;
     uint32_t distinct_values[MAX_COLUMNS];
     Value min_values[MAX_COLUMNS];
@@ -447,13 +446,11 @@ typedef struct {
 } TableStats;
 
 typedef struct SeqScanPlan {
-    char table_name[MAX_TABLE_NAME_LEN];
     uint8_t table_id;
     Expr *where_clause;
 } SeqScanPlan;
 
 typedef struct IndexScanPlan {
-    char table_name[MAX_TABLE_NAME_LEN];
     uint8_t table_id;
     Index *index;
     Expr *where_clause;
@@ -496,18 +493,16 @@ void agg_add_value(AggState *state, Value *value);
 Value agg_get_result(AggState *state);
 void agg_cleanup(AggState *state);
 
-TableStats *get_table_stats(const char *table_name);
-void collect_table_stats(const char *table_name);
+TableStats *get_table_stats(uint8_t table_id);
+void collect_table_stats(uint8_t table_id);
 double estimate_selectivity(const TableStats *stats, int col_idx, OperatorType op,
                             const Value *value);
-Index *find_index_by_table_column(const char *table_name, const char *column_name);
+Index *find_index_by_table_column(uint8_t table_id, uint16_t column_id);
 
-PlanNode *optimize_select(const char *table_name, Expr *where_clause);
-PlanNode *create_seq_scan_plan(const char *table_name, Expr *where_clause);
+PlanNode *optimize_select(uint8_t table_id, Expr *where_clause);
+PlanNode *create_seq_scan_plan(uint8_t table_id, Expr *where_clause);
 void free_plan(PlanNode *plan);
 
-void index_table_columns(const char *table_name, const char *columns[], int col_count,
-                         const char *index_name, IndexType type);
 Index *find_index(const char *index_name);
 ArrayList *btree_find_equals(Index *index, const Value *key);
 void assert_double_almost_eq(double expected, double actual, double tolerance, const char *message);
@@ -529,9 +524,8 @@ void exec_ast(ASTNode *ast);
 void free_tokens(Token *tokens);
 void free_ast(ASTNode *ast);
 
-void index_table_column(const char *table_name, const char *column_name, const char *index_name);
+void index_table(uint8_t table_id, ArrayList *column_ids, const char *index_name);
 void drop_index_by_name(const char *index_name);
-Index *find_index(const char *index_name);
 int hash_value(const Value *value, int bucket_count);
 void clear_query_result(void);
 

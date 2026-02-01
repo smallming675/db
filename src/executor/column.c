@@ -42,6 +42,10 @@ Value get_column_value(const Row *row, const TableDef *schema, const char *colum
     return val;
 }
 
+Value get_column_value_by_id(const Row *row, uint16_t column_id) {
+    return get_column_value_by_index(row, NULL, column_id);
+}
+
 Value get_column_value_from_join(const Row *row, const TableDef *left_schema,
                                  const TableDef *right_schema, int left_col_count,
                                  const char *column_name) {
@@ -54,6 +58,20 @@ Value get_column_value_from_join(const Row *row, const TableDef *left_schema,
     if (right_idx >= 0) {
         int actual_idx = left_col_count + right_idx;
         return get_column_value_by_index(row, NULL, actual_idx);
+    }
+
+    Value val = {0};
+    val.type = TYPE_NULL;
+    return val;
+}
+
+Value get_column_value_by_id_from_join(const Row *row, int left_col_count,
+                                       uint8_t table_id, uint16_t column_id,
+                                       uint8_t left_table_id, uint8_t right_table_id) {
+    if (table_id == left_table_id) {
+        return get_column_value_by_index(row, NULL, column_id);
+    } else if (table_id == right_table_id) {
+        return get_column_value_by_index(row, NULL, left_col_count + column_id);
     }
 
     Value val = {0};

@@ -89,29 +89,15 @@ static int get_bucket_index(const Value *key, int bucket_count) {
     return hash % bucket_count;
 }
 
-static void build_hash_table(HashJoinTable *ht, Table *table, const char *key_column,
-                             const TableDef *schema) {
+static void build_hash_table(HashJoinTable *ht, Table *table, uint16_t col_id) {
     int row_count = alist_length(&table->rows);
-    int col_idx = -1;
-
-    int col_count = alist_length(&schema->columns);
-    for (int i = 0; i < col_count; i++) {
-        ColumnDef *col = (ColumnDef *)alist_get(&schema->columns, i);
-        if (col && strcasecmp(col->name, key_column) == 0) {
-            col_idx = i;
-            break;
-        }
-    }
-
-    if (col_idx < 0)
-        return;
 
     for (int i = 0; i < row_count; i++) {
         Row *row = (Row *)alist_get(&table->rows, i);
         if (!row)
             continue;
 
-        Value *key_val = (Value *)alist_get(row, col_idx);
+        Value *key_val = (Value *)alist_get(row, col_id);
         if (!key_val)
             continue;
 
@@ -124,22 +110,9 @@ static void build_hash_table(HashJoinTable *ht, Table *table, const char *key_co
 }
 
 static void probe_hash_table(const HashJoinTable *ht, Table *probe_table,
-                             const char *probe_key_column, const TableDef *probe_schema,
-                             Table *build_table, Table *result_table, bool is_left_join,
+                             uint16_t probe_col_id, Table *build_table,
+                             Table *result_table, bool is_left_join,
                              int left_cols, int right_cols) {
-    int probe_col_idx = -1;
-    int probe_col_count = alist_length(&probe_schema->columns);
-    for (int i = 0; i < probe_col_count; i++) {
-        ColumnDef *col = (ColumnDef *)alist_get(&probe_schema->columns, i);
-        if (col && strcasecmp(col->name, probe_key_column) == 0) {
-            probe_col_idx = i;
-            break;
-        }
-    }
-
-    if (probe_col_idx < 0)
-        return;
-
     int probe_rows = alist_length(&probe_table->rows);
 
     for (int i = 0; i < probe_rows; i++) {
@@ -147,7 +120,7 @@ static void probe_hash_table(const HashJoinTable *ht, Table *probe_table,
         if (!probe_row)
             continue;
 
-        Value *probe_key = (Value *)alist_get(probe_row, probe_col_idx);
+        Value *probe_key = (Value *)alist_get(probe_row, probe_col_id);
         if (!probe_key)
             continue;
 
@@ -157,11 +130,10 @@ static void probe_hash_table(const HashJoinTable *ht, Table *probe_table,
 
         if (bucket_row_count == 0) {
             if (is_left_join) {
-                Row *new_row = create_left_join_null_row(probe_row, left_cols);
+                Row *new_row = create_left_join_null_row(probe_row, right_cols);
                 if (new_row) {
                     Row *slot = (Row *)alist_append(&result_table->rows);
                     if (slot) {
-                        memclear(slot, sizeof(Row));
                         alist_init(slot, sizeof(Value), free_value);
                         for (int k = 0; k < alist_length(new_row); k++) {
                             Value *src_val = (Value *)alist_get(new_row, k);
@@ -206,15 +178,20 @@ static bool try_hash_join(Table *result_table, SelectNode *select, Table *left_t
     if (!select->join_condition)
         return false;
 
-    const char *left_col = NULL;
-    const char *right_col = NULL;
+    uint16_t left_col_id;
+    uint16_t right_col_id;
 
     Expr *left = select->join_condition->binary.left;
     Expr *right = select->join_condition->binary.right;
 
     if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
-        left_col = left->column_name;
-        right_col = right->column_name;
+        if (left->column.table_id == left_table->table_id) {
+            left_col_id = left->column.column_id;
+            right_col_id = right->column.column_id;
+        } else {
+            left_col_id = right->column.column_id;
+            right_col_id = left->column.column_id;
+        }
     } else {
         return false;
     }
@@ -230,7 +207,7 @@ static bool try_hash_join(Table *result_table, SelectNode *select, Table *left_t
                 Row *left_row = (Row *)alist_get(&left_table->rows, i);
                 if (!left_row)
                     continue;
-                Row *new_row = create_left_join_null_row(left_row, left_cols);
+                Row *new_row = create_left_join_null_row(left_row, right_cols);
                 if (new_row) {
                     Row *slot = (Row *)alist_append(&result_table->rows);
                     if (slot) {
@@ -255,29 +232,23 @@ static bool try_hash_join(Table *result_table, SelectNode *select, Table *left_t
 
     Table *build_table;
     Table *probe_table;
-    const char *build_col;
-    const char *probe_col;
-    const TableDef *build_schema;
-    const TableDef *probe_schema;
+    uint16_t build_col_id;
+    uint16_t probe_col_id;
 
     if (left_row_count <= right_row_count) {
         build_table = left_table;
         probe_table = right_table;
-        build_col = left_col;
-        probe_col = right_col;
-        build_schema = &left_table->schema;
-        probe_schema = &right_table->schema;
+        build_col_id = left_col_id;
+        probe_col_id = right_col_id;
     } else {
         build_table = right_table;
         probe_table = left_table;
-        build_col = right_col;
-        probe_col = left_col;
-        build_schema = &right_table->schema;
-        probe_schema = &left_table->schema;
+        build_col_id = right_col_id;
+        probe_col_id = left_col_id;
     }
 
-    build_hash_table(ht, build_table, build_col, build_schema);
-    probe_hash_table(ht, probe_table, probe_col, probe_schema, build_table, result_table,
+    build_hash_table(ht, build_table, build_col_id);
+    probe_hash_table(ht, probe_table, probe_col_id, build_table, result_table,
                      is_left_join, left_cols, right_cols);
 
     free_hash_table(ht);
@@ -369,8 +340,8 @@ static void process_join_rows(Table *result_table, SelectNode *select, Table *le
             bool match = true;
             if (select->join_condition) {
                 match =
-                    eval_expression_for_join(select->join_condition, left_row, &left_table->schema,
-                                             &right_table->schema, left_cols);
+                    eval_expression_for_join(select->join_condition, left_row, left_table->table_id,
+                                             right_table->table_id, left_cols);
             }
 
             if (match) {
@@ -654,7 +625,7 @@ static Value compute_count_aggregate(Table *table, ArrayList *filtered_indices, 
             int i = select->where_clause ? *(int *)alist_get(filtered_indices, idx) : idx;
             Row *row = (Row *)alist_get(&table->rows, i);
             if (row) {
-                Value val = get_column_value(row, &table->schema, operand->column_name);
+                Value val = get_column_value_by_id(row, operand->column.column_id);
                 if (is_null(&val))
                     null_count++;
             }
@@ -674,7 +645,7 @@ static Value compute_sum_aggregate(Table *table, ArrayList *filtered_indices, in
             int i = select->where_clause ? *(int *)alist_get(filtered_indices, idx) : idx;
             Row *row = (Row *)alist_get(&table->rows, i);
             if (row) {
-                Value val = get_column_value(row, &table->schema, operand->column_name);
+                Value val = get_column_value_by_id(row, operand->column.column_id);
                 if (val.type == TYPE_INT)
                     sum += val.int_val;
                 else if (val.type == TYPE_FLOAT)
@@ -697,7 +668,7 @@ static Value compute_avg_aggregate(Table *table, ArrayList *filtered_indices, in
             int i = select->where_clause ? *(int *)alist_get(filtered_indices, idx) : idx;
             Row *row = (Row *)alist_get(&table->rows, i);
             if (row) {
-                Value val = get_column_value(row, &table->schema, operand->column_name);
+                Value val = get_column_value_by_id(row, operand->column.column_id);
                 if (val.type == TYPE_INT) {
                     sum += val.int_val;
                     count++;
@@ -722,7 +693,7 @@ static Value compute_min_aggregate(Table *table, ArrayList *filtered_indices, in
             int i = select->where_clause ? *(int *)alist_get(filtered_indices, idx) : idx;
             Row *row = (Row *)alist_get(&table->rows, i);
             if (row) {
-                Value val = get_column_value(row, &table->schema, operand->column_name);
+                Value val = get_column_value_by_id(row, operand->column.column_id);
                 if (val.type == TYPE_INT && val.int_val < min_val)
                     min_val = val.int_val;
                 else if (val.type == TYPE_FLOAT && val.float_val < min_val)
@@ -744,7 +715,7 @@ static Value compute_max_aggregate(Table *table, ArrayList *filtered_indices, in
             int i = select->where_clause ? *(int *)alist_get(filtered_indices, idx) : idx;
             Row *row = (Row *)alist_get(&table->rows, i);
             if (row) {
-                Value val = get_column_value(row, &table->schema, operand->column_name);
+                Value val = get_column_value_by_id(row, operand->column.column_id);
                 if (val.type == TYPE_INT && val.int_val > max_val)
                     max_val = val.int_val;
                 else if (val.type == TYPE_FLOAT && val.float_val > max_val)
@@ -781,8 +752,14 @@ static void setup_query_result(QueryResult **result, Table *table, SelectNode *s
         } else {
             Expr **expr = (Expr **)alist_get(&select->expressions, i);
             const char *alias = expr[0]->alias;
-            name =
-                alias[0] ? alias : (expr[0]->type == EXPR_COLUMN ? expr[0]->column_name : "expr");
+            if (alias && alias[0]) {
+                name = alias;
+            } else if (expr[0]->type == EXPR_COLUMN) {
+                ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, expr[0]->column.column_id);
+                name = col ? col->name : "unknown";
+            } else {
+                name = "expr";
+            }
         }
         char *name_copy = malloc(strlen(name) + 1);
         if (!name_copy) {
@@ -826,9 +803,9 @@ static void process_aggregate_result_rows(QueryResult *result, ArrayList *agg_re
 static void process_regular_result_rows(QueryResult *result, Table *table, SelectNode *select,
                                         bool is_select_star, int col_count) {
     int row_count = alist_length(&table->rows);
-    int limit = select->limit > 0 ? select->limit : row_count;
+    uint32_t limit = select->limit > 0 ? select->limit : (uint32_t)row_count;
 
-    for (int i = 0; i < row_count && alist_length(&result->rows) < limit; i++) {
+    for (int i = 0; i < row_count && (uint32_t)alist_length(&result->rows) < limit; i++) {
         Row *row = (Row *)alist_get(&table->rows, i);
         if (!row || alist_length(row) == 0)
             continue;

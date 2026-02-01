@@ -129,12 +129,13 @@ void exec_update_row_ast(ASTNode *ast) {
             continue;
         for (int j = 0; j < alist_length(&update->values); j++) {
             ColumnValue *cv = (ColumnValue *)alist_get(&update->values, j);
-            if (!(cv && cv->column_idx >= 0))
+            if (!cv)
                 continue;
-            Value *row_val = (Value *)alist_get(row, cv->column_idx);
-            Value new_val = copy_string_value(&cv->value);
 
-            if (!check_foreign_key_constraint(table, cv->column_idx, &new_val)) {
+            Value *row_val = (Value *)alist_get(row, cv->column_id);
+        Value new_val = copy_value(&cv->value);
+
+        if (!check_foreign_key_constraint(table, cv->column_id, &new_val)) {
                 log_msg(LOG_ERROR, "UPDATE aborted due to foreign key constraint violation");
                 free_value(&new_val);
                 return;

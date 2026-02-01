@@ -9,7 +9,7 @@
 #include "table.h"
 #include "values.h"
 
-static bool is_indexable_equality(const Expr *expr, const char **col_name, Value *key_value) {
+static bool is_indexable_equality(const Expr *expr, uint16_t *col_id, Value *key_value) {
     if (!expr || expr->type != EXPR_BINARY_OP)
         return false;
     if (expr->binary.op != OP_EQUALS)
@@ -19,12 +19,12 @@ static bool is_indexable_equality(const Expr *expr, const char **col_name, Value
     Expr *right = expr->binary.right;
 
     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
-        *col_name = left->column_name;
+        *col_id = left->column.column_id;
         *key_value = copy_value(&right->value);
         return true;
     }
     if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
-        *col_name = right->column_name;
+        *col_id = right->column.column_id;
         *key_value = copy_value(&left->value);
         return true;
     }
@@ -35,13 +35,13 @@ bool try_index_filter(Table *table, const Expr *where_expr, ArrayList *result) {
     if (!table || !where_expr || !result)
         return false;
 
-    const char *col_name = NULL;
+    uint16_t col_id = 0;
     Value key_value = {0};
 
-    if (is_indexable_equality(where_expr, &col_name, &key_value)) {
-        Index *index = find_index_by_table_column(table->name, col_name);
+    if (is_indexable_equality(where_expr, &col_id, &key_value)) {
+        Index *index = find_index_by_table_column(table->table_id, col_id);
         if (index) {
-            log_msg(LOG_DEBUG, "try_index_filter: Using index on %s.%s", table->name, col_name);
+            log_msg(LOG_DEBUG, "try_index_filter: Using index on table_id=%d col_id=%d", table->table_id, col_id);
             lookup_index_values(index, &key_value, result);
             free_value(&key_value);
             return true;
@@ -51,20 +51,20 @@ bool try_index_filter(Table *table, const Expr *where_expr, ArrayList *result) {
     return false;
 }
 
-bool eval_cmp_expression(const Expr *expr, const Row *row, const TableDef *schema) {
+bool eval_cmp_expression(const Expr *expr, const Row *row, const TableDef *schema __attribute__((unused))) {
     Expr *left = expr->binary.left;
     Expr *right = expr->binary.right;
     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
-        return eval_comparison(get_column_value(row, schema, left->column_name), right->value,
+        return eval_comparison(get_column_value_by_id(row, left->column.column_id), right->value,
                                expr->binary.op);
     }
     if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
-        return eval_comparison(left->value, get_column_value(row, schema, right->column_name),
+        return eval_comparison(left->value, get_column_value_by_id(row, right->column.column_id),
                                expr->binary.op);
     }
     if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
-        return eval_comparison(get_column_value(row, schema, left->column_name),
-                               get_column_value(row, schema, right->column_name), expr->binary.op);
+        return eval_comparison(get_column_value_by_id(row, left->column.column_id),
+                               get_column_value_by_id(row, right->column.column_id), expr->binary.op);
     }
     return false;
 }
@@ -75,7 +75,7 @@ bool eval_expression(const Expr *expr, const Row *row, const TableDef *schema) {
 
     switch (expr->type) {
     case EXPR_COLUMN: {
-        Value val = get_column_value(row, schema, expr->column_name);
+        Value val = get_column_value_by_id(row, expr->column.column_id);
         return !is_null(&val);
     }
     case EXPR_VALUE:
@@ -110,35 +110,39 @@ bool eval_expression(const Expr *expr, const Row *row, const TableDef *schema) {
     }
 }
 
-static bool eval_cmp_operation(const Expr *expr, const Row *row, const TableDef *left_schema,
-                               const TableDef *right_schema, int left_col_count) {
+static bool eval_cmp_operation(const Expr *expr, const Row *row, uint8_t left_table_id,
+                               uint8_t right_table_id, int left_col_count) {
     Expr *left = expr->binary.left;
     Expr *right = expr->binary.right;
     if (left->type == EXPR_COLUMN && right->type == EXPR_VALUE) {
-        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema,
-                                                          left_col_count, left->column_name),
+        return eval_comparison(get_column_value_by_id_from_join(row, left_col_count,
+                                                          left->column.table_id, left->column.column_id,
+                                                          left_table_id, right_table_id),
                                right->value, expr->binary.op);
     }
     if (left->type == EXPR_VALUE && right->type == EXPR_COLUMN) {
         return eval_comparison(left->value,
-                               get_column_value_from_join(row, left_schema, right_schema,
-                                                          left_col_count, right->column_name),
+                               get_column_value_by_id_from_join(row, left_col_count,
+                                                          right->column.table_id, right->column.column_id,
+                                                          left_table_id, right_table_id),
                                expr->binary.op);
     }
     if (left->type == EXPR_COLUMN && right->type == EXPR_COLUMN) {
-        return eval_comparison(get_column_value_from_join(row, left_schema, right_schema,
-                                                          left_col_count, left->column_name),
-                               get_column_value_from_join(row, left_schema, right_schema,
-                                                          left_col_count, right->column_name),
+        return eval_comparison(get_column_value_by_id_from_join(row, left_col_count,
+                                                          left->column.table_id, left->column.column_id,
+                                                          left_table_id, right_table_id),
+                               get_column_value_by_id_from_join(row, left_col_count,
+                                                          right->column.table_id, right->column.column_id,
+                                                          left_table_id, right_table_id),
                                expr->binary.op);
     }
     return false;
 }
-static bool eval_binary_operation(const Expr *expr, const Row *row, const TableDef *left_schema,
-                                  const TableDef *right_schema, int left_col_count) {
+static bool eval_binary_operation(const Expr *expr, const Row *row, uint8_t left_table_id,
+                                  uint8_t right_table_id, int left_col_count) {
     bool left_val =
-        eval_expression_for_join(expr->binary.left, row, left_schema, right_schema, left_col_count);
-    bool right_val = eval_expression_for_join(expr->binary.right, row, left_schema, right_schema,
+        eval_expression_for_join(expr->binary.left, row, left_table_id, right_table_id, left_col_count);
+    bool right_val = eval_expression_for_join(expr->binary.right, row, left_table_id, right_table_id,
                                               left_col_count);
 
     switch (expr->binary.op) {
@@ -152,31 +156,32 @@ static bool eval_binary_operation(const Expr *expr, const Row *row, const TableD
     case OP_LESS_EQUAL:
     case OP_GREATER:
     case OP_GREATER_EQUAL:
-        return eval_cmp_operation(expr, row, left_schema, right_schema, left_col_count);
+        return eval_cmp_operation(expr, row, left_table_id, right_table_id, left_col_count);
     default:
         return false;
     }
 }
 
-bool eval_expression_for_join(const Expr *expr, const Row *row, const TableDef *left_schema,
-                              const TableDef *right_schema, int left_col_count) {
+bool eval_expression_for_join(const Expr *expr, const Row *row, uint8_t left_table_id,
+                              uint8_t right_table_id, int left_col_count) {
     if (!expr)
         return true;
 
     switch (expr->type) {
     case EXPR_COLUMN: {
-        Value val = get_column_value_from_join(row, left_schema, right_schema, left_col_count,
-                                               expr->column_name);
+        Value val = get_column_value_by_id_from_join(row, left_col_count,
+                                               expr->column.table_id, expr->column.column_id,
+                                               left_table_id, right_table_id);
         return !is_null(&val);
     }
     case EXPR_VALUE:
         return !is_null(&expr->value);
     case EXPR_BINARY_OP:
-        return eval_binary_operation(expr, row, left_schema, right_schema, left_col_count);
+        return eval_binary_operation(expr, row, left_table_id, right_table_id, left_col_count);
 
     case EXPR_UNARY_OP: {
-        bool operand_val = eval_expression_for_join(expr->unary.operand, row, left_schema,
-                                                    right_schema, left_col_count);
+        bool operand_val = eval_expression_for_join(expr->unary.operand, row, left_table_id,
+                                                    right_table_id, left_col_count);
         return expr->unary.op == OP_NOT ? !operand_val : false;
     }
     default:
@@ -369,7 +374,7 @@ Value eval_select_expression(Expr *expr, const Row *row, const TableDef *schema)
 
     switch (expr->type) {
     case EXPR_COLUMN: {
-        Value col_val = get_column_value(row, schema, expr->column_name);
+        Value col_val = get_column_value_by_id(row, expr->column.column_id);
         return copy_string_value(&col_val);
     }
     case EXPR_VALUE:

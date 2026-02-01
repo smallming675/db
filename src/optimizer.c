@@ -1,6 +1,7 @@
 #include "db.h"
 #include "table.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,8 +11,8 @@
 static TableStats g_stats[MAX_TABLES];
 static int g_stats_count = 0;
 
-static double estimate_seq_scan_cost(const char *table_name) {
-    TableStats *stats = get_table_stats(table_name);
+static double estimate_seq_scan_cost(uint8_t table_id) {
+    TableStats *stats = get_table_stats(table_id);
     if (!stats) {
         return 1000.0;
     }
@@ -22,29 +23,18 @@ static double estimate_seq_scan_cost(const char *table_name) {
     return base_cost + io_cost;
 }
 
-static double estimate_index_scan_cost(const char *table_name, Index *index, OperatorType op,
+static double estimate_index_scan_cost(uint8_t table_id, Index *index, OperatorType op,
                                        const Value *value) {
-    TableStats *stats = get_table_stats(table_name);
+    TableStats *stats = get_table_stats(table_id);
     if (!stats) {
         return 500.0;
     }
 
     double selectivity = 0.1;
-    if (index->column_count == 1) {
-        int col_idx = -1;
-        Table *table = find_table(table_name);
-        if (table) {
-            for (int i = 0; i < alist_length(&table->schema.columns); i++) {
-                ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, i);
-                if (col && strcmp(col->name, index->column_names[0]) == 0) {
-                    col_idx = i;
-                    break;
-                }
-            }
-        }
-
-        if (col_idx >= 0) {
-            selectivity = estimate_selectivity(stats, col_idx, op, value);
+    if (alist_length(&index->columns) > 0) {
+        uint16_t *col_id_ptr = (uint16_t *)alist_get(&index->columns, 0);
+        if (col_id_ptr) {
+            selectivity = estimate_selectivity(stats, *col_id_ptr, op, value);
         }
     }
 
@@ -55,7 +45,7 @@ static double estimate_index_scan_cost(const char *table_name, Index *index, Ope
     return index_cost + table_access_cost;
 }
 
-PlanNode *create_seq_scan_plan(const char *table_name, Expr *where_clause) {
+PlanNode *create_seq_scan_plan(uint8_t table_id, Expr *where_clause) {
     PlanNode *plan = malloc(sizeof(PlanNode));
     if (!plan)
         return NULL;
@@ -64,20 +54,18 @@ PlanNode *create_seq_scan_plan(const char *table_name, Expr *where_clause) {
     plan->left = NULL;
     plan->right = NULL;
 
-    strcopy(plan->plan.seq_scan.table_name, sizeof(plan->plan.seq_scan.table_name), table_name);
-
     plan->plan.seq_scan.where_clause = where_clause;
-    plan->plan.seq_scan.table_id = find_table_id_by_name(table_name);
+    plan->plan.seq_scan.table_id = table_id;
 
-    plan->cost = estimate_seq_scan_cost(table_name);
+    plan->cost = estimate_seq_scan_cost(table_id);
 
-    TableStats *stats = get_table_stats(table_name);
+    TableStats *stats = get_table_stats(table_id);
     plan->estimated_rows = stats ? stats->total_rows : 1000;
 
     return plan;
 }
 
-static PlanNode *create_index_scan_plan(const char *table_name, Index *index, Expr *where_clause,
+static PlanNode *create_index_scan_plan(uint8_t table_id, Index *index, Expr *where_clause,
                                         OperatorType op, const Value *value) {
     PlanNode *plan = malloc(sizeof(PlanNode));
     if (!plan)
@@ -87,11 +75,9 @@ static PlanNode *create_index_scan_plan(const char *table_name, Index *index, Ex
     plan->left = NULL;
     plan->right = NULL;
 
-    strcopy(plan->plan.index_scan.table_name, sizeof(plan->plan.index_scan.table_name), table_name);
-
     plan->plan.index_scan.index = index;
     plan->plan.index_scan.where_clause = where_clause;
-    plan->plan.index_scan.table_id = find_table_id_by_name(table_name);
+    plan->plan.index_scan.table_id = table_id;
     plan->plan.index_scan.op = op;
 
     if (value) {
@@ -101,27 +87,16 @@ static PlanNode *create_index_scan_plan(const char *table_name, Index *index, Ex
         plan->plan.index_scan.search_key = NULL;
     }
 
-    plan->cost = estimate_index_scan_cost(table_name, index, op, value);
+    plan->cost = estimate_index_scan_cost(table_id, index, op, value);
 
-    TableStats *stats = get_table_stats(table_name);
+    TableStats *stats = get_table_stats(table_id);
     double base_rows = stats ? stats->total_rows : 1000;
     double selectivity = 0.1;
 
-    if (index->column_count == 1 && stats) {
-        int col_idx = -1;
-        Table *table = find_table(table_name);
-        if (table) {
-            for (int i = 0; i < alist_length(&table->schema.columns); i++) {
-                ColumnDef *col = (ColumnDef *)alist_get(&table->schema.columns, i);
-                if (col && strcmp(col->name, index->column_names[0]) == 0) {
-                    col_idx = i;
-                    break;
-                }
-            }
-        }
-
-        if (col_idx >= 0) {
-            selectivity = estimate_selectivity(stats, col_idx, op, value);
+    if (alist_length(&index->columns) > 0 && stats) {
+        uint16_t *col_id_ptr = (uint16_t *)alist_get(&index->columns, 0);
+        if (col_id_ptr) {
+            selectivity = estimate_selectivity(stats, *col_id_ptr, op, value);
         }
     }
 
@@ -130,21 +105,22 @@ static PlanNode *create_index_scan_plan(const char *table_name, Index *index, Ex
     return plan;
 }
 
-static bool is_simple_indexable_predicate(Expr *expr, char *table_name,
-                                          char col_name[MAX_COLUMN_NAME_LEN], OperatorType *op,
-                                          Value **value) {
-    if (!expr || !table_name)
+static bool is_simple_indexable_predicate(Expr *expr, uint8_t table_id, uint16_t *column_id,
+                                          OperatorType *op, Value **value) {
+    if (!expr)
         return false;
 
     if (expr->type == EXPR_BINARY_OP) {
         if (expr->binary.left->type == EXPR_COLUMN &&
             (expr->binary.right->type == EXPR_VALUE || expr->binary.right->type == EXPR_COLUMN)) {
-            strcopy(col_name, MAX_COLUMN_NAME_LEN, expr->binary.left->column_name);
-            *op = expr->binary.op;
+            if (expr->binary.left->column.table_id == table_id) {
+                *column_id = expr->binary.left->column.column_id;
+                *op = expr->binary.op;
 
-            if (expr->binary.right->type == EXPR_VALUE) {
-                *value = &expr->binary.right->value;
-                return true;
+                if (expr->binary.right->type == EXPR_VALUE) {
+                    *value = &expr->binary.right->value;
+                    return true;
+                }
             }
         }
     }
@@ -152,32 +128,29 @@ static bool is_simple_indexable_predicate(Expr *expr, char *table_name,
     return false;
 }
 
-PlanNode *optimize_select(const char *table_name, Expr *where_clause) {
-    if (!table_name)
-        return NULL;
-
-    collect_table_stats(table_name);
+PlanNode *optimize_select(uint8_t table_id, Expr *where_clause) {
+    collect_table_stats(table_id);
 
     PlanNode *best_plan = NULL;
     double best_cost = 1e9;
 
-    PlanNode *seq_plan = create_seq_scan_plan(table_name, where_clause);
+    PlanNode *seq_plan = create_seq_scan_plan(table_id, where_clause);
     if (seq_plan && seq_plan->cost < best_cost) {
         best_cost = seq_plan->cost;
         best_plan = seq_plan;
     }
 
     if (where_clause) {
-        char col_name[MAX_COLUMN_NAME_LEN];
+        uint16_t col_id;
         OperatorType op;
         Value *value;
 
-        if (is_simple_indexable_predicate(where_clause, (char *)table_name, col_name, &op,
+        if (is_simple_indexable_predicate(where_clause, table_id, &col_id, &op,
                                           &value)) {
-            Index *index = find_index_by_table_column(table_name, col_name);
+            Index *index = find_index_by_table_column(table_id, col_id);
             if (index) {
                 PlanNode *idx_plan =
-                    create_index_scan_plan(table_name, index, where_clause, op, value);
+                    create_index_scan_plan(table_id, index, where_clause, op, value);
                 if (idx_plan && idx_plan->cost < best_cost) {
                     if (best_plan == seq_plan) {
                         free(seq_plan);
@@ -194,7 +167,9 @@ PlanNode *optimize_select(const char *table_name, Expr *where_clause) {
     }
 
     if (best_plan) {
-        log_msg(LOG_INFO, "optimize_select: Best plan for '%s' cost=%.2f rows=%d", table_name,
+        Table *table = get_table_by_id(table_id);
+        log_msg(LOG_INFO, "optimize_select: Best plan for '%s' cost=%.2f rows=%d",
+                table ? table->name : "unknown",
                 best_plan->cost, best_plan->estimated_rows);
         if (seq_plan && seq_plan != best_plan) {
             free(seq_plan);
@@ -252,31 +227,24 @@ void free_plan(PlanNode *plan) {
     free(plan);
 }
 
-TableStats *get_table_stats(const char *table_name) {
-    if (!table_name)
-        return NULL;
-
+TableStats *get_table_stats(uint8_t table_id) {
     for (int i = 0; i < g_stats_count; i++) {
-        if (strcmp(g_stats[i].table_name, table_name) == 0) {
+        if (g_stats[i].table_id == table_id) {
             return &g_stats[i];
         }
     }
     return NULL;
 }
 
-void collect_table_stats(const char *table_name) {
-    if (!table_name)
-        return;
-
+void collect_table_stats(uint8_t table_id) {
     for (int i = 0; i < g_stats_count; i++) {
-        if (strcmp(g_stats[i].table_name, table_name) == 0) {
+        if (g_stats[i].table_id == table_id) {
             return;
         }
     }
 
     if (g_stats_count < MAX_TABLES) {
-        strcopy(g_stats[g_stats_count].table_name, sizeof(g_stats[g_stats_count].table_name),
-                table_name);
+        g_stats[g_stats_count].table_id = table_id;
         g_stats[g_stats_count].total_rows = 1000; // Default estimate
         g_stats[g_stats_count].has_stats = false;
 
@@ -285,6 +253,6 @@ void collect_table_stats(const char *table_name) {
         }
 
         g_stats_count++;
-        log_msg(LOG_INFO, "Collected stats for table '%s'", table_name);
+        log_msg(LOG_INFO, "Collected stats for table_id=%d", table_id);
     }
 }
